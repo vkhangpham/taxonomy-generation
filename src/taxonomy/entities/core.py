@@ -5,10 +5,29 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from enum import Enum
 from math import log
-from typing import Dict, List, Sequence
+from typing import Any, Dict, List, Mapping, Sequence
+from urllib.parse import urlparse, urlunparse
+import hashlib
+import re
 from uuid import uuid4
 
 from pydantic import BaseModel, Field, field_validator, model_validator
+
+
+def _normalize_url(url: str) -> str:
+    """Normalize and validate URLs for canonical storage."""
+
+    parsed = urlparse(url)
+    if parsed.scheme not in {"http", "https"}:
+        raise ValueError("URL must use http or https scheme")
+    if not parsed.netloc:
+        raise ValueError("URL must include a hostname")
+
+    netloc = parsed.netloc.lower()
+    scheme = parsed.scheme.lower()
+    path = parsed.path or "/"
+    normalized = parsed._replace(scheme=scheme, netloc=netloc, fragment="", path=path)
+    return urlunparse(normalized)
 
 
 class Provenance(BaseModel):
@@ -255,6 +274,125 @@ class SplitOp(BaseModel):
         return self
 
 
+class PageSnapshotMeta(BaseModel):
+    """Supplemental metadata recorded for a fetched page snapshot."""
+
+    rendered: bool = Field(default=False, description="Whether headless rendering was required")
+    robots_blocked: bool = Field(default=False, description="Whether the fetch was blocked by robots.txt")
+    redirects: List[str] = Field(
+        default_factory=list,
+        description="Ordered list of redirect URLs that occurred before the final fetch.",
+    )
+    source: str = Field(
+        default="crawl",
+        min_length=1,
+        description="Origin of the snapshot capture (e.g. crawl, cache, manual).",
+    )
+
+    @field_validator("redirects")
+    @classmethod
+    def _validate_redirects(cls, value: List[str]) -> List[str]:
+        return [_normalize_url(item) for item in value]
+
+    @field_validator("source")
+    @classmethod
+    def _normalize_source(cls, value: str) -> str:
+        normalized = value.strip().lower()
+        if not normalized:
+            raise ValueError("meta.source must not be empty")
+        return normalized
+
+
+class PageSnapshot(BaseModel):
+    """Canonical representation of a fetched institutional web page."""
+
+    institution: str = Field(..., min_length=1, description="Institution identifier associated with the page")
+    url: str = Field(..., description="Landing URL that was requested for the snapshot")
+    canonical_url: str | None = Field(
+        default=None,
+        description="Normalized canonical URL for the page, defaults to the landing URL",
+    )
+    fetched_at: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc),
+        description="UTC timestamp of when the page was fetched",
+    )
+    http_status: int = Field(..., ge=100, le=599, description="HTTP status code returned by the fetch")
+    content_type: str = Field(..., min_length=3, description="MIME content type reported by the server")
+    html: str | None = Field(default=None, description="Raw HTML payload when available")
+    text: str = Field(..., min_length=1, description="Extracted and normalized textual content")
+    lang: str = Field(default="und", min_length=2, description="Detected language code (BCP-47)")
+    checksum: str = Field(..., min_length=64, max_length=64, description="SHA-256 checksum of normalized text")
+    meta: PageSnapshotMeta = Field(default_factory=PageSnapshotMeta)
+
+    @staticmethod
+    def compute_checksum(text: str) -> str:
+        """Return the SHA-256 checksum for the normalized text."""
+
+        normalized = " ".join(text.split())
+        return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+
+    @field_validator("institution")
+    @classmethod
+    def _normalize_institution(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("institution must contain non-whitespace characters")
+        return normalized
+
+    @field_validator("url")
+    @classmethod
+    def _normalize_url_field(cls, value: str) -> str:
+        return _normalize_url(value)
+
+    @field_validator("canonical_url")
+    @classmethod
+    def _normalize_canonical_url(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        return _normalize_url(value)
+
+    @field_validator("content_type")
+    @classmethod
+    def _normalize_content_type(cls, value: str) -> str:
+        normalized = value.strip().lower()
+        if "/" not in normalized:
+            raise ValueError("content_type must be a valid MIME type")
+        return normalized
+
+    @field_validator("lang")
+    @classmethod
+    def _normalize_lang(cls, value: str) -> str:
+        code = value.strip().lower()
+        if len(code) < 2 or len(code) > 35 or not re.match(r"^[a-z0-9-]+$", code):
+            raise ValueError("lang must be a valid BCP-47 identifier")
+        return code
+
+    @field_validator("checksum")
+    @classmethod
+    def _validate_checksum(cls, value: str) -> str:
+        checksum = value.strip().lower()
+        if not re.fullmatch(r"[0-9a-f]{64}", checksum):
+            raise ValueError("checksum must be a 64-character hexadecimal SHA-256 digest")
+        return checksum
+
+    @field_validator("text")
+    @classmethod
+    def _validate_text(cls, value: str) -> str:
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError("text must contain non-whitespace characters")
+        return cleaned
+
+    @model_validator(mode="after")
+    def _finalize(self) -> "PageSnapshot":
+        if self.canonical_url is None:
+            self.canonical_url = self.url
+        expected_checksum = self.compute_checksum(self.text)
+        if self.checksum != expected_checksum:
+            raise ValueError("checksum does not match normalized text content")
+        return self
+
+
 __all__ = [
     "Provenance",
     "SourceMeta",
@@ -267,4 +405,6 @@ __all__ = [
     "ValidationFinding",
     "MergeOp",
     "SplitOp",
+    "PageSnapshotMeta",
+    "PageSnapshot",
 ]

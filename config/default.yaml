@@ -57,11 +57,41 @@ policies:
     dynamic_content: false
     pdf_processing_limit: 500
     ttl_cache_days: 14
+    include_patterns: []
+    robots_cache_ttl_hours: 12
+    sitemap_discovery: true
+    respect_crawl_delay: true
     firecrawl:
       concurrency: 6
       max_depth: 3
       max_pages: 300
       render_timeout_ms: 10000
+      api_key_env_var: FIRECRAWL_API_KEY
+      endpoint_url: null
+      request_timeout_seconds: 20.0
+      retry_attempts: 3
+      user_agent: TaxonomyBot/1.0
+    budgets:
+      max_pages: 300
+      max_depth: 3
+      max_time_minutes: 30
+      max_content_size_mb: 5
+    content:
+      language_allowlist:
+        - en
+      language_confidence_threshold: 0.6
+      min_text_length: 120
+      pdf_extraction_enabled: true
+      pdf_size_limit_mb: 5
+    cache:
+      cache_directory: ".cache/web"
+      ttl_days: 14
+      cleanup_interval_hours: 12
+      max_size_gb: null
+    observability:
+      metrics_enabled: true
+      sampling_rate: 0.1
+      example_snapshot_count: 5
   llm:
     temperature: 0.0
     nucleus_top_p: 1.0
