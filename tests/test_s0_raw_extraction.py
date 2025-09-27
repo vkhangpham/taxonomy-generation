@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 
 from taxonomy.config.policies import RawExtractionPolicy
+from taxonomy.config.settings import Settings
 from taxonomy.entities.core import PageSnapshot, PageSnapshotMeta
 from taxonomy.pipeline.s0_raw_extraction import (
     ContentSegmenter,
@@ -71,6 +72,29 @@ def test_segmenter_detects_headers_lists_and_removes_boilerplate(
     assert list_block.section == "Overview:"
 
 
+def test_segmenter_does_not_flag_double_space_paragraphs_as_table(
+    sample_policy: RawExtractionPolicy
+) -> None:
+    segmenter = ContentSegmenter(sample_policy)
+    text = (
+        "Our mission  is to  serve the community.\n"
+        "We provide  guidance  daily to students and faculty alike."
+    )
+    snapshot = _build_snapshot(text)
+    result = segmenter.segment(snapshot)
+    assert all(block.block_type != "table" for block in result.blocks)
+
+
+def test_segmenter_detects_pipe_delimited_tables(
+    sample_policy: RawExtractionPolicy
+) -> None:
+    segmenter = ContentSegmenter(sample_policy)
+    text = "Name | Department | Phone\nAlice | Engineering | 1234"
+    snapshot = _build_snapshot(text)
+    result = segmenter.segment(snapshot)
+    assert any(block.block_type == "table" for block in result.blocks)
+
+
 def test_processor_filters_language_confidence(
     sample_policy: RawExtractionPolicy, segmented_snapshot: SnapshotRecord
 ) -> None:
@@ -82,6 +106,33 @@ def test_processor_filters_language_confidence(
     records = processor.process(low_confidence)
     assert records == []
     assert processor.metrics.pages_language_skipped == 1
+
+
+def test_processor_requires_confidence_when_configured(
+    sample_policy: RawExtractionPolicy, segmented_snapshot: SnapshotRecord
+) -> None:
+    processor = RawExtractionProcessor(sample_policy)
+    missing_confidence = SnapshotRecord(
+        snapshot=segmented_snapshot.snapshot,
+        metadata={},
+    )
+    records = processor.process(missing_confidence)
+    assert records == []
+    assert processor.metrics.pages_language_skipped == 1
+
+
+def test_processor_allows_missing_confidence_in_permissive_mode(
+    segmented_snapshot: SnapshotRecord
+) -> None:
+    policy = RawExtractionPolicy(require_language_confidence=False)
+    processor = RawExtractionProcessor(policy)
+    missing_confidence = SnapshotRecord(
+        snapshot=segmented_snapshot.snapshot,
+        metadata={},
+    )
+    records = processor.process(missing_confidence)
+    assert len(records) == 3
+    assert processor.metrics.pages_language_skipped == 0
 
 
 def test_processor_deduplicates_near_identical_blocks(sample_policy: RawExtractionPolicy) -> None:
@@ -131,6 +182,34 @@ def test_loader_reads_jsonl_snapshot(tmp_path: Path, segmented_snapshot: Snapsho
     assert records[0].language_confidence == pytest.approx(0.93)
 
 
+def test_loader_writes_quarantine_on_invalid_snapshot(tmp_path: Path) -> None:
+    settings = Settings(
+        create_dirs=True,
+        paths={"metadata_dir": str(tmp_path / "metadata")},
+        observability={
+            "quarantine_enabled": True,
+            "quarantine_dir": str(tmp_path / "quarantine"),
+        },
+    )
+    loader = SnapshotLoader(settings=settings)
+    payload = {"snapshot": {"url": "https://example.edu/bad"}}  # missing required fields
+    jsonl = tmp_path / "invalid.jsonl"
+    jsonl.write_text(json.dumps(payload) + "\n", encoding="utf-8")
+
+    records = list(loader.load_from_jsonl(jsonl))
+    assert records == []
+    assert loader.metrics.validation_errors == 1
+
+    quarantine_file = loader.quarantine_file
+    assert quarantine_file is not None
+    contents = [json.loads(line) for line in quarantine_file.read_text(encoding="utf-8").splitlines() if line]
+    assert len(contents) == 1
+    entry = contents[0]
+    assert entry["file"] == str(jsonl)
+    assert entry["url"] == "https://example.edu/bad"
+    assert "raw" in entry
+
+
 def test_extract_from_snapshots_end_to_end(tmp_path: Path, segmented_snapshot: SnapshotRecord) -> None:
     payload = {
         "snapshot": segmented_snapshot.snapshot.model_dump(mode="json"),
@@ -152,3 +231,42 @@ def test_extract_from_snapshots_end_to_end(tmp_path: Path, segmented_snapshot: S
     metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
     assert metadata["processor"]["pages_emitted"] == 1
     assert metadata["processor"]["blocks_kept"] == 3
+
+
+def test_processor_writes_quarantine_on_failure(
+    sample_policy: RawExtractionPolicy, segmented_snapshot: SnapshotRecord, tmp_path: Path
+) -> None:
+    class ExplodingSegmenter(ContentSegmenter):
+        def __init__(self) -> None:
+            pass
+
+        def segment(self, snapshot: PageSnapshot):  # type: ignore[override]
+            raise RuntimeError("boom")
+
+    quarantine_file = tmp_path / "processor.quarantine.jsonl"
+    processor = RawExtractionProcessor(
+        sample_policy,
+        segmenter=ExplodingSegmenter(),
+        quarantine_path=quarantine_file,
+    )
+    failing_record = SnapshotRecord(
+        snapshot=segmented_snapshot.snapshot,
+        metadata={
+            "source_file": "input.jsonl",
+            "source_line": 12,
+            "language_confidence": 0.99,
+        },
+    )
+
+    records = processor.process(failing_record)
+    assert records == []
+    assert processor.metrics.pages_failed == 1
+
+    contents = [json.loads(line) for line in quarantine_file.read_text(encoding="utf-8").splitlines() if line]
+    assert len(contents) == 1
+    entry = contents[0]
+    assert entry["file"] == "input.jsonl"
+    assert entry["line"] == 12
+    assert entry["url"] == segmented_snapshot.snapshot.url
+    assert entry["institution"] == segmented_snapshot.snapshot.institution
+    assert entry["raw"]["metadata"]["source_file"] == "input.jsonl"

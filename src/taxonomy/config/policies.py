@@ -248,6 +248,10 @@ class RawExtractionPolicy(BaseModel):
     max_chars: int = Field(default=2000, ge=1)
     target_language: str = Field(default="en", min_length=1)
     language_confidence_threshold: float = Field(default=0.8, ge=0.0, le=1.0)
+    require_language_confidence: bool = Field(
+        default=True,
+        description="Require language confidence metadata unless target_language is 'any'.",
+    )
     intra_page_dedup_enabled: bool = Field(default=True)
     similarity_threshold: float = Field(default=0.95, ge=0.0, le=1.0)
     similarity_method: str = Field(default="jaccard_shingles", min_length=1)

@@ -9,7 +9,7 @@ from typing import Any, Dict, Iterable, Iterator, List, Optional
 
 from ...config.settings import Settings, get_settings
 from ...entities.core import PageSnapshot
-from ...utils import get_logger
+from ...utils import ensure_directory, get_logger
 
 
 @dataclass
@@ -47,12 +47,41 @@ class LoaderMetrics:
 class SnapshotLoader:
     """Utility capable of loading snapshots from files or iterables."""
 
-    def __init__(self, settings: Settings | None = None, *, enable_cache: bool = False) -> None:
+    def __init__(
+        self,
+        settings: Settings | None = None,
+        *,
+        enable_cache: bool = False,
+        quarantine_path: Path | None = None,
+        quarantine_enabled: bool | None = None,
+    ) -> None:
         self.settings = settings or get_settings()
         self.enable_cache = enable_cache
         self.metrics = LoaderMetrics()
         self._logger = get_logger(module=__name__)
         self._cache: Dict[Path, List[SnapshotRecord]] = {}
+        self._quarantine_dir: Path | None = None
+        self._quarantine_file: Path | None = None
+
+        effective_quarantine = (
+            quarantine_enabled
+            if quarantine_enabled is not None
+            else self.settings.observability.quarantine_enabled
+        )
+        if effective_quarantine:
+            candidate = quarantine_path or self.settings.observability.resolve_directory(
+                self.settings.paths
+            )
+            if candidate is not None:
+                candidate_path = Path(candidate)
+                if candidate_path.suffix:
+                    self._quarantine_file = candidate_path
+                    self._quarantine_dir = candidate_path.parent
+                else:
+                    self._quarantine_dir = candidate_path
+                    self._quarantine_file = candidate_path / "snapshots.quarantine.jsonl"
+
+        self._quarantine_enabled = effective_quarantine and self._quarantine_file is not None
 
     def load_from_jsonl(self, file_path: Path | str) -> Iterator[SnapshotRecord]:
         path = Path(file_path)
@@ -80,6 +109,14 @@ class SnapshotLoader:
                         file=str(path),
                         line=line_no,
                         error=str(exc),
+                    )
+                    self._record_quarantine(
+                        file=str(path),
+                        line=line_no,
+                        url=None,
+                        institution=None,
+                        error=str(exc),
+                        raw=stripped,
                     )
                     continue
                 record = self._create_record(payload, source=str(path), line=line_no)
@@ -130,6 +167,14 @@ class SnapshotLoader:
                     institution=record.snapshot.institution,
                     error=str(exc),
                 )
+                self._record_quarantine(
+                    file=None,
+                    line=None,
+                    url=record.snapshot.url,
+                    institution=record.snapshot.institution,
+                    error=str(exc),
+                    raw=record.snapshot.model_dump(mode="json"),
+                )
                 continue
             yield record
 
@@ -160,8 +205,53 @@ class SnapshotLoader:
                 line=line,
                 error=str(exc),
             )
+            snapshot_url = snapshot_payload.get("url") if isinstance(snapshot_payload, dict) else None
+            institution = snapshot_payload.get("institution") if isinstance(snapshot_payload, dict) else None
+            self._record_quarantine(
+                file=source,
+                line=line,
+                url=snapshot_url,
+                institution=institution,
+                error=str(exc),
+                raw=snapshot_payload,
+            )
             return None
         return SnapshotRecord(snapshot=snapshot, metadata=metadata)
+
+    @property
+    def quarantine_file(self) -> Optional[Path]:
+        return self._quarantine_file
+
+    def _record_quarantine(
+        self,
+        *,
+        file: Optional[str],
+        line: Optional[int],
+        url: Optional[str],
+        institution: Optional[str],
+        error: str,
+        raw: Any,
+    ) -> None:
+        if not self._quarantine_enabled or self._quarantine_file is None:
+            return
+
+        try:
+            ensure_directory(self._quarantine_dir or self._quarantine_file.parent)
+            entry = {
+                "file": file,
+                "line": line,
+                "url": url,
+                "institution": institution,
+                "error": error,
+                "raw": raw,
+            }
+            with self._quarantine_file.open("a", encoding="utf-8") as handle:
+                handle.write(json.dumps(entry, ensure_ascii=False))
+                handle.write("\n")
+        except Exception:  # pragma: no cover - quarantine must not break pipeline
+            self._logger.exception(
+                "Failed to write quarantine artefact", path=str(self._quarantine_file)
+            )
 
 
 __all__ = ["SnapshotLoader", "SnapshotRecord", "LoaderMetrics"]

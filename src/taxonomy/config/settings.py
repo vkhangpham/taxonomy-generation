@@ -111,6 +111,26 @@ class PathsConfig(BaseModel):
             object.__setattr__(self, field_name, path)
 
 
+class PipelineObservabilityConfig(BaseModel):
+    """Observability controls shared across pipeline stages."""
+
+    quarantine_enabled: bool = Field(default=False)
+    quarantine_dir: Path | None = Field(default=None)
+
+    def resolve_directory(self, paths: PathsConfig) -> Path | None:
+        """Resolve the on-disk location for quarantine artefacts."""
+
+        if not self.quarantine_enabled:
+            return None
+        if self.quarantine_dir is not None:
+            target = Path(self.quarantine_dir)
+        else:
+            target = Path(paths.metadata_dir) / "quarantine"
+        if not target.is_absolute():
+            target = PROJECT_ROOT / target
+        return target
+
+
 class Settings(BaseSettings):
     """Primary configuration object for the taxonomy application.
 
@@ -133,6 +153,7 @@ class Settings(BaseSettings):
     )
     config_dir: Path = Field(default=DEFAULT_CONFIG_DIR)
     paths: PathsConfig = Field(default_factory=PathsConfig)
+    observability: PipelineObservabilityConfig = Field(default_factory=PipelineObservabilityConfig)
     create_dirs: bool = Field(
         default=False,
         description="Create filesystem directories declared in `paths` during initialisation.",
@@ -176,6 +197,9 @@ class Settings(BaseSettings):
 
         if self.create_dirs:
             self.paths.ensure_exists()
+            quarantine_dir = self.observability.resolve_directory(self.paths)
+            if quarantine_dir is not None:
+                quarantine_dir.mkdir(parents=True, exist_ok=True)
         return self
 
     @property

@@ -35,7 +35,7 @@ class ContentSegmenter:
     """DOM-aware heuristic segmenter for snapshot text content."""
 
     _LIST_PATTERN = re.compile(r"^(?:[-+*•‣◦]|\d+[.)]|[a-z][.)])\s+", re.IGNORECASE)
-    _TABLE_PATTERN = re.compile(r"\s{2,}|\t|\|")
+    _MULTISPACE_PATTERN = re.compile(r" {2,}")
 
     def __init__(self, policy: RawExtractionPolicy) -> None:
         self.policy = policy
@@ -50,6 +50,7 @@ class ContentSegmenter:
         """Split snapshot text into semantic blocks preserving order."""
 
         lines = snapshot.text.splitlines()
+        table_map = self._detect_table_lines(lines)
         blocks: List[SegmentedBlock] = []
         boilerplate_removed = 0
         current_lines: List[str] = []
@@ -87,7 +88,7 @@ class ContentSegmenter:
             order += 1
             current_lines.clear()
 
-        for raw_line in lines:
+        for idx, raw_line in enumerate(lines):
             stripped = raw_line.strip()
             if not stripped:
                 flush_block()
@@ -110,12 +111,13 @@ class ContentSegmenter:
                         boilerplate_removed += 1
                 continue
 
-            line_type = self._classify_line(stripped)
+            line_type = self._classify_line(stripped, table_map[idx])
             if line_type != current_type:
                 flush_block()
                 current_type = line_type
 
-            prepared_line = self._prepare_line(stripped, line_type)
+            source_line = raw_line if line_type == "table" else stripped
+            prepared_line = self._prepare_line(source_line, line_type)
             current_lines.append(prepared_line)
 
         flush_block()
@@ -140,10 +142,10 @@ class ContentSegmenter:
             return True
         return False
 
-    def _classify_line(self, line: str) -> str:
+    def _classify_line(self, line: str, is_table_line: bool) -> str:
         if self.policy.segment_on_lists and self._LIST_PATTERN.match(line):
             return "list"
-        if self.policy.segment_on_tables and self._TABLE_PATTERN.search(line):
+        if self.policy.segment_on_tables and is_table_line:
             return "table"
         return "paragraph"
 
@@ -157,6 +159,56 @@ class ContentSegmenter:
         if not self._boilerplate_patterns:
             return False
         return any(pattern.search(text) for pattern in self._boilerplate_patterns)
+
+    def _detect_table_lines(self, raw_lines: List[str]) -> List[bool]:
+        table_flags: List[bool] = [False] * len(raw_lines)
+        if not self.policy.segment_on_tables:
+            return table_flags
+
+        stripped = [line.strip() for line in raw_lines]
+        pipe_flags = [line.count("|") >= 2 for line in stripped]
+        tab_flags = ["\t" in line for line in raw_lines]
+        multi_space_columns = [self._multi_space_columns(line) for line in raw_lines]
+
+        for idx, content in enumerate(stripped):
+            if not content:
+                continue
+            if pipe_flags[idx]:
+                table_flags[idx] = True
+                continue
+            if tab_flags[idx] and (
+                (idx > 0 and tab_flags[idx - 1]) or (idx + 1 < len(raw_lines) and tab_flags[idx + 1])
+            ):
+                table_flags[idx] = True
+                continue
+            if (
+                self._columns_align(multi_space_columns[idx], multi_space_columns[idx - 1])
+                if idx > 0
+                else False
+            ) or (
+                self._columns_align(multi_space_columns[idx], multi_space_columns[idx + 1])
+                if idx + 1 < len(raw_lines)
+                else False
+            ):
+                table_flags[idx] = True
+
+        return table_flags
+
+    def _multi_space_columns(self, line: str) -> List[int]:
+        return [
+            match.start()
+            for match in self._MULTISPACE_PATTERN.finditer(line)
+            if (match.end() - match.start()) >= 3
+        ]
+
+    @staticmethod
+    def _columns_align(current: List[int], other: List[int]) -> bool:
+        if len(current) < 2 or len(other) < 2:
+            return False
+        for position in current:
+            if any(abs(position - candidate) <= 1 for candidate in other):
+                return True
+        return False
 
 
 __all__ = ["ContentSegmenter", "SegmentedBlock", "SegmentationResult"]

@@ -6,6 +6,9 @@ paths:
   cache_dir: .cache
   logs_dir: logs
   metadata_dir: metadata
+observability:
+  quarantine_enabled: false
+  quarantine_dir: metadata/quarantine
 policies:
   policy_version: "0.1"
   level_thresholds:

@@ -4,11 +4,13 @@ from __future__ import annotations
 
 from collections import defaultdict
 from dataclasses import dataclass, field
+import json
+from pathlib import Path
 from typing import Any, Dict, Iterable, List, Protocol, Sequence, runtime_checkable
 
 from ...config.policies import RawExtractionPolicy
 from ...entities.core import PageSnapshot, Provenance, SourceMeta, SourceRecord
-from ...utils import find_duplicates, get_logger
+from ...utils import ensure_directory, find_duplicates, get_logger
 from .segmenter import ContentSegmenter, SegmentedBlock, SegmentationResult
 
 
@@ -53,11 +55,18 @@ class SnapshotEnvelope(Protocol):
 class RawExtractionProcessor:
     """Pipeline component that emits SourceRecords from PageSnapshots."""
 
-    def __init__(self, policy: RawExtractionPolicy, segmenter: ContentSegmenter | None = None) -> None:
+    def __init__(
+        self,
+        policy: RawExtractionPolicy,
+        segmenter: ContentSegmenter | None = None,
+        *,
+        quarantine_path: Path | None = None,
+    ) -> None:
         self.policy = policy
         self.segmenter = segmenter or ContentSegmenter(policy)
         self.metrics = ProcessingMetrics()
         self._logger = get_logger(module=__name__)
+        self._quarantine_path = Path(quarantine_path) if quarantine_path else None
 
     def process(self, entry: PageSnapshot | SnapshotEnvelope) -> List[SourceRecord]:
         """Process a single snapshot or envelope into SourceRecords."""
@@ -95,6 +104,7 @@ class RawExtractionProcessor:
                 institution=snapshot.institution,
                 error=str(exc),
             )
+            self._record_quarantine(snapshot, metadata, str(exc))
             return []
 
     def process_many(
@@ -120,10 +130,17 @@ class RawExtractionProcessor:
         snapshot_lang = (snapshot.lang or "und").lower()
         base_lang = snapshot_lang.split("-")[0]
         confidence = metadata.get("language_confidence")
-        try:
-            confidence_value = float(confidence) if confidence is not None else 1.0
-        except (TypeError, ValueError):
-            confidence_value = 0.0
+        require_confidence = getattr(self.policy, "require_language_confidence", True)
+        if confidence is None:
+            if target != "any" and require_confidence:
+                confidence_value = 0.0
+            else:
+                confidence_value = 1.0
+        else:
+            try:
+                confidence_value = float(confidence)
+            except (TypeError, ValueError):
+                confidence_value = 0.0
         if confidence_value < self.policy.language_confidence_threshold:
             return False
         if target == "any":
@@ -203,6 +220,36 @@ class RawExtractionProcessor:
             )
             records.append(record)
         return records
+
+    def _record_quarantine(
+        self,
+        snapshot: PageSnapshot,
+        metadata: Dict[str, Any],
+        error: str,
+    ) -> None:
+        if self._quarantine_path is None:
+            return
+        try:
+            ensure_directory(self._quarantine_path.parent)
+            entry = {
+                "file": metadata.get("source_file") or metadata.get("source"),
+                "line": metadata.get("source_line"),
+                "url": snapshot.url,
+                "institution": snapshot.institution,
+                "error": error,
+                "raw": {
+                    "snapshot": snapshot.model_dump(mode="json"),
+                    "metadata": dict(metadata),
+                },
+            }
+            with self._quarantine_path.open("a", encoding="utf-8") as handle:
+                handle.write(json.dumps(entry, ensure_ascii=False))
+                handle.write("\n")
+        except Exception:  # pragma: no cover - quarantine must not break pipeline
+            self._logger.exception(
+                "Failed to persist processor quarantine record",
+                path=str(self._quarantine_path),
+            )
 
 
 __all__ = ["RawExtractionProcessor", "ProcessingMetrics"]

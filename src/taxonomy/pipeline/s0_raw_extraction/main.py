@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
-from typing import Iterable, Iterator, List, Sequence
+from typing import Iterable, Iterator, Sequence
 
 try:  # pragma: no cover - optional dependency
     from tqdm import tqdm
@@ -38,7 +38,11 @@ def extract_from_snapshots(
 
     loader = SnapshotLoader(settings=settings)
     segmenter = ContentSegmenter(settings.policies.raw_extraction)
-    processor = RawExtractionProcessor(settings.policies.raw_extraction, segmenter)
+    processor = RawExtractionProcessor(
+        settings.policies.raw_extraction,
+        segmenter,
+        quarantine_path=loader.quarantine_file,
+    )
     writer = RecordWriter()
 
     snapshot_iter = _resolve_snapshot_iter(snapshot_source, loader)
@@ -47,20 +51,26 @@ def extract_from_snapshots(
     if tqdm is not None:
         iterable = tqdm(iterable, desc="Snapshots", unit="page")
 
-    collected_records: List[SourceRecord] = []
-    for record in iterable:
-        collected_records.extend(processor.process(record))
+    records_iter = processor.process_many(iterable)
+
+    produced_records = False
+
+    def record_stream() -> Iterable[SourceRecord]:
+        nonlocal produced_records
+        for record in records_iter:
+            produced_records = True
+            yield record
 
     output_path = Path(output_path)
     ensure_directory(output_path.parent if output_path.suffix else output_path)
 
-    if not collected_records:
-        logger.warning("No SourceRecords generated", output=str(output_path))
-
     if output_path.suffix:
-        records_location = writer.write_jsonl(collected_records, output_path, compress=compress)
+        records_location = writer.write_jsonl(record_stream(), output_path, compress=compress)
     else:
-        records_location = writer.write_batch(collected_records, output_path, batch_size=batch_size)
+        records_location = writer.write_batch(record_stream(), output_path, batch_size=batch_size)
+
+    if not produced_records:
+        logger.warning("No SourceRecords generated", output=str(output_path))
 
     stats_path = output_path if isinstance(records_location, Path) else Path(output_path)
     if isinstance(records_location, list):

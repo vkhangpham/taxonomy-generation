@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Iterable, List, Sequence
 
 from ...entities.core import SourceRecord
-from ...utils import chunked, ensure_directory, get_logger, serialize_json
+from ...utils import ensure_directory, get_logger, serialize_json
 
 
 class RecordWriter:
@@ -56,19 +56,36 @@ class RecordWriter:
     ) -> List[Path]:
         path = Path(output_dir)
         ensure_directory(path)
-        records_list = list(records)
-        if not records_list:
-            return []
-        batches = list(chunked(records_list, batch_size))
+        batch: List[SourceRecord] = []
         written_paths: List[Path] = []
-        for idx, batch in enumerate(batches, start=1):
-            file_path = path / f"{prefix}_{idx:05d}.jsonl"
-            written_paths.append(self.write_jsonl(batch, file_path))
+        total_count = 0
+
+        def flush(current_batch: List[SourceRecord]) -> None:
+            nonlocal total_count
+            if not current_batch:
+                return
+            current_size = len(current_batch)
+            file_index = len(written_paths) + 1
+            file_path = path / f"{prefix}_{file_index:05d}.jsonl"
+            written_paths.append(self.write_jsonl(current_batch, file_path))
+            total_count += current_size
+            current_batch.clear()
+
+        for record in records:
+            batch.append(record)
+            if len(batch) >= batch_size:
+                current = batch
+                batch = []
+                flush(current)
+
+        if batch:
+            flush(batch)
+
         self._logger.info(
             "Wrote batched SourceRecords",
             directory=str(path),
             batches=len(written_paths),
-            total=len(records_list),
+            total=total_count,
         )
         return written_paths
 
