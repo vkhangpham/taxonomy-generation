@@ -1,5 +1,5 @@
-You are a deterministic information extractor building a program taxonomy.
-All outputs MUST be valid JSON-only with no leading or trailing prose.
+You are a deterministic information extractor building an academic taxonomy.
+Return ONLY a JSON array that conforms to ``prompts/schemas/extraction.json``.
 Institution: {{ institution }}
 Hierarchy level: {{ level }}
 Source material:
@@ -7,11 +7,35 @@ Source material:
 {{ source_text }}
 """
 
-Rules:
-- Return an array of candidates sorted by the lowercase ``normalized`` value.
-- Each candidate is an object with fields ``label`` (verbatim surface), ``normalized`` (canonical minimal form), and ``aliases`` (array, may be empty).
-- For ``normalized`` apply lowercase, strip punctuation, collapse whitespace, remove boilerplate phrases.
-- Only include concepts clearly supported by the context for level {{ level }}.
-- Do not include explanatory text, markdown, or trailing commas.
+Guidelines:
+- Every candidate object MUST contain ``label`` (verbatim text), ``normalized`` (canonical form), ``aliases`` (array, may be empty), and ``parents`` (array of textual anchors; empty ONLY for level 0).
+- Sort the array by the lowercase ``normalized`` field to guarantee deterministic output.
+- Never invent information or copy unrelated boilerplate; omit uncertain items.
+- Preserve strong evidence for parent anchors: use section headers, breadcrumb text, or explicit mentions. When none exist, return an empty ``parents`` array (level 0 only).
+- Do not emit explanations, markdown, or trailing commas—JSON only.
+
+Level definitions:
+{% if level == 0 %}
+- Level 0 represents top-level academic units ("College of Engineering", "School of Medicine"). Include unique divisions that operate at the institution level.
+- Example output:
+  [{"label": "College of Engineering", "normalized": "college of engineering", "parents": [], "aliases": ["college of engineering"]}]
+{% elif level == 1 %}
+- Level 1 represents departments or programs inside a college/school ("Department of Computer Science"). Strip boilerplate prefixes like "Department of" when normalizing.
+- Example output:
+  [{"label": "Department of Computer Science", "normalized": "computer science", "parents": ["college of engineering"], "aliases": ["dept. of computer science", "cs"]}]
+{% elif level == 2 %}
+- Level 2 represents research areas, labs, or centers associated with a department or college ("Center for Quantum Computing"). Use parent anchors pointing to the owning L0/L1 units when stated.
+- Example output:
+  [{"label": "Center for Quantum Computing", "normalized": "quantum computing", "parents": ["department of physics"], "aliases": ["center for quantum computing"]}]
+{% else %}
+- Level 3 represents fine-grained topics such as conference tracks or focus areas ("Neural Information Processing"). Parent anchors should reference the L2/L1 context.
+- Example output:
+  [{"label": "Neural Information Processing", "normalized": "neural information processing", "parents": ["machine learning"], "aliases": ["neural information processing"]}]
+{% endif %}
+
+Normalization hints:
+- Lowercase for ``normalized``; remove diacritics, punctuation, repeated whitespace, and boilerplate prefixes like "Department of", "School of", "Center for" while retaining them in ``aliases``.
+- Include clear acronyms seen in the text inside ``aliases`` (e.g., "CS", "EECS").
+- Preserve important diacritics in ``label``/``aliases`` even if ``normalized`` folds them.
 
 Respond with JSON:

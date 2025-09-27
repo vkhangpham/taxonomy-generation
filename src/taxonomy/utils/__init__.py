@@ -9,6 +9,15 @@ from .helpers import (
     stable_shuffle,
 )
 from .logging import configure_logging, get_logger
+from .normalization import (
+    AliasBundle,
+    detect_acronyms,
+    expand_acronym,
+    generate_aliases,
+    normalize_by_level,
+    remove_boilerplate,
+    to_canonical_form,
+)
 from .similarity import (
     compute_similarity,
     find_duplicates,
@@ -26,6 +35,13 @@ __all__ = [
     "serialize_json",
     "stable_shuffle",
     "chunked",
+    "AliasBundle",
+    "remove_boilerplate",
+    "detect_acronyms",
+    "expand_acronym",
+    "generate_aliases",
+    "normalize_by_level",
+    "to_canonical_form",
     "preprocess_for_similarity",
     "jaccard_similarity",
     "minhash_similarity",

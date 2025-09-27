@@ -8,26 +8,41 @@
       "label": {
         "type": "string",
         "minLength": 1,
-        "maxLength": 128
+        "maxLength": 160,
+        "description": "Surface form exactly as observed in the source text"
       },
       "normalized": {
         "type": "string",
         "minLength": 1,
-        "maxLength": 128
+        "maxLength": 160,
+        "description": "Canonical form used for deterministic comparisons"
       },
       "aliases": {
         "type": "array",
         "items": {
           "type": "string",
           "minLength": 1,
-          "maxLength": 128
+          "maxLength": 160
         },
         "default": [],
+        "maxItems": 10,
+        "description": "Alternative spellings, acronyms, or boilerplate variants",
         "uniqueItems": true
+      },
+      "parents": {
+        "type": "array",
+        "items": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        },
+        "description": "Textual parent anchors resolved by downstream logic",
+        "default": []
       }
     },
-    "required": ["label", "normalized"],
+    "required": ["label", "normalized", "parents"],
     "additionalProperties": false
   },
-  "uniqueItems": true
+  "uniqueItems": true,
+  "description": "Array sorted by lowercase normalized label for deterministic output"
 }

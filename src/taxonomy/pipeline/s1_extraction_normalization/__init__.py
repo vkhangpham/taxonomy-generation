@@ -1,15 +1,22 @@
-"""Placeholder module for S1 extraction and normalization logic."""
+"""S1 extraction & normalization pipeline."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Protocol, Sequence
 
-from loguru import logger
+from taxonomy.entities.core import Candidate, Concept, SourceRecord
+
+from .extractor import ExtractionMetrics, ExtractionProcessor, RawExtractionCandidate
+from .io import generate_metadata, load_source_records, write_candidates
+from .main import extract_candidates
+from .normalizer import CandidateNormalizer, NormalizedCandidate
+from .parent_index import ParentIndex
+from .processor import S1Processor
 
 
 class NormalizationStage(Protocol):
-    """Interface for normalization sub-stages."""
+    """Legacy protocol retained for backwards compatibility."""
 
     name: str
 
@@ -19,14 +26,27 @@ class NormalizationStage(Protocol):
 
 @dataclass
 class ExtractionNormalizer:
-    """Composite runner for S1 logic (LLM + rule-based normalization)."""
+    """Compatibility wrapper that sequentially executes provided stages."""
 
-    stages: list[NormalizationStage]
+    stages: Sequence[NormalizationStage]
 
     def execute(self) -> None:
         for stage in self.stages:
-            logger.info("Running S1 stage", stage=stage.name)
             stage.run()
 
 
-__all__ = ["NormalizationStage", "ExtractionNormalizer"]
+__all__ = [
+    "extract_candidates",
+    "ExtractionProcessor",
+    "CandidateNormalizer",
+    "ParentIndex",
+    "S1Processor",
+    "ExtractionMetrics",
+    "RawExtractionCandidate",
+    "NormalizedCandidate",
+    "generate_metadata",
+    "load_source_records",
+    "write_candidates",
+    "NormalizationStage",
+    "ExtractionNormalizer",
+]
