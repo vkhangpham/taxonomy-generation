@@ -46,12 +46,30 @@ class JSONValidator:
         return ValidationResult(ok=False, parsed=None, repaired=repaired, error=last_error)
 
     def _load_schema(self, schema_path: str) -> Dict[str, Any]:
-        path = (self._schema_base_path / schema_path).resolve()
+        path = self._resolve_schema_path(schema_path)
         if not path.exists():
             raise FileNotFoundError(f"Schema not found: {path}")
         with path.open("r", encoding="utf-8") as handle:
             data = json.load(handle)
         return data
+
+    def describe_schema(self, schema_path: str, *, max_keys: int = 5) -> str:
+        """Return a compact human-readable summary for constrained retries."""
+
+        schema = self._load_schema(schema_path)
+        title = schema.get("title")
+        if isinstance(title, str) and title.strip():
+            return title.strip()
+        if isinstance(schema.get("properties"), dict) and schema["properties"]:
+            keys = list(schema["properties"].keys())
+            preview = keys[:max_keys]
+            if len(keys) > max_keys:
+                preview.append("...")
+            return f"object with keys: {', '.join(preview)}"
+        schema_type = schema.get("type")
+        if isinstance(schema_type, str) and schema_type:
+            return schema_type
+        return Path(schema_path).name
 
     @staticmethod
     def _validate_schema(payload: Any, schema: Dict[str, Any]) -> None:
@@ -72,6 +90,13 @@ class JSONValidator:
         if match:
             return match.group(1)
         return None
+
+    def _resolve_schema_path(self, schema_path: str) -> Path:
+        base = self._schema_base_path.resolve()
+        path = (base / schema_path).resolve()
+        if path != base and base not in path.parents:
+            raise ValueError("Schema path escapes base directory")
+        return path
 
 
 __all__ = ["JSONValidator"]

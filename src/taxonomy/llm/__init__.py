@@ -1,6 +1,6 @@
 """Public API surface for the taxonomy LLM package."""
 
-from .client import LLMClient, run
+from .client import LLMClient, get_default_client, run
 from .models import (
     LLMOptions,
     LLMRequest,
@@ -19,6 +19,7 @@ from .validation import JSONValidator
 
 __all__ = [
     "LLMClient",
+    "get_default_client",
     "run",
     "LLMOptions",
     "LLMRequest",

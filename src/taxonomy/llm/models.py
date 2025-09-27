@@ -55,6 +55,8 @@ class LLMOptions(BaseModel):
     provider_hint: Optional[str] = None
     timeout_seconds: Optional[float] = Field(default=None, ge=0.1)
     retry_attempts: Optional[int] = Field(default=None, ge=0)
+    top_p: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+    json_mode: Optional[bool] = None
 
     @model_validator(mode="after")
     def _ensure_stop_entries(self) -> "LLMOptions":

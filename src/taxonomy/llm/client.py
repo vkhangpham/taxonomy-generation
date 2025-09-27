@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import time
+import threading
 from pathlib import Path
 from typing import Any, Dict, Optional
 
 from jinja2 import Environment, FileSystemLoader, StrictUndefined
 
-from ..config.policies import LLMDeterminismSettings
+from ..config.policies import LLMDeterminismSettings, load_policies
 from .models import (
     LLMOptions,
     LLMRequest,
@@ -19,7 +20,7 @@ from .models import (
     ValidationError,
 )
 from .observability import MetricsCollector
-from .providers import ProviderManager
+from .providers import ProviderManager, build_provider_manager
 from .registry import PromptRegistry
 from .validation import JSONValidator
 
@@ -41,6 +42,10 @@ class LLMClient:
         self._provider_manager = provider_manager
         self._validator = validator
         self._metrics = metrics or MetricsCollector()
+        self._provider_manager.configure_policy_defaults(
+            top_p=self._settings.nucleus_top_p,
+            json_mode=self._settings.json_mode,
+        )
         templates_root = Path(settings.registry.templates_root)
         if not templates_root.exists():
             raise FileNotFoundError(f"Templates directory missing: {templates_root}")
@@ -69,18 +74,24 @@ class LLMClient:
         template = self._env.get_template(prompt_meta.template_path)
         rendered_prompt = template.render(**request.variables)
         merged_options = self._merge_options(request.options)
-        attempts = 0
+        total_attempts = 1 + (merged_options.retry_attempts or self._settings.retry_attempts)
+        quarantine_threshold = max(1, self._settings.repair.quarantine_after_attempts)
+        failures = 0
+        backoff = max(0.0, self._settings.retry_backoff_seconds)
+        constrained_prompt: Optional[str] = None
+        constrained_applied = False
+        schema_hint: Optional[str] = None
         last_error: Optional[str] = None
-        backoff = self._settings.retry_backoff_seconds
-        max_attempts = merged_options.retry_attempts or self._settings.retry_attempts
-        while attempts <= max_attempts:
-            attempts += 1
+
+        for attempt in range(total_attempts):
+            prompt_to_use = constrained_prompt or rendered_prompt
             try:
-                provider_response = self._provider_manager.execute(rendered_prompt, merged_options)
+                provider_response = self._provider_manager.execute(prompt_to_use, merged_options)
             except ProviderError as exc:
                 last_error = str(exc)
+                failures += 1
                 self._metrics.incr("provider_error")
-                if not exc.retryable or attempts > max_attempts:
+                if not exc.retryable or attempt == total_attempts - 1:
                     return LLMResponse.failure(
                         raw=None,
                         tokens=TokenUsage(),
@@ -88,9 +99,14 @@ class LLMClient:
                         error=last_error,
                         latency_ms=0.0,
                     )
-                time.sleep(backoff)
-                backoff *= 2
+                if failures >= quarantine_threshold:
+                    self._metrics.incr("quarantined")
+                    raise QuarantineError(last_error or "LLM response quarantined")
+                if backoff > 0 and attempt < total_attempts - 1:
+                    time.sleep(backoff)
+                    backoff *= 2
                 continue
+
             validation = self._validator.validate(
                 provider_response.content,
                 prompt_meta.schema_path,
@@ -102,6 +118,7 @@ class LLMClient:
                 provider_response.usage.completion_tokens,
             )
             self._metrics.record_latency(provider_response.performance.latency_ms)
+
             if validation.ok:
                 metadata = self._response_meta(
                     prompt_meta,
@@ -115,12 +132,32 @@ class LLMClient:
                     metadata=metadata,
                     latency_ms=provider_response.performance.latency_ms,
                 )
+
             last_error = validation.error or "Unknown validation error"
+            failures += 1
             self._metrics.incr("invalid_json")
-            if attempts > max_attempts:
+
+            first_retry_eligible = not constrained_applied and attempt < total_attempts - 1
+            if first_retry_eligible:
+                if schema_hint is None:
+                    schema_hint = self._validator.describe_schema(prompt_meta.schema_path)
+                constrained_prompt = self._build_constrained_prompt(rendered_prompt, schema_hint)
+                constrained_applied = True
+                if merged_options.json_mode is not True:
+                    merged_options = merged_options.model_copy(update={"json_mode": True})
+
+            if failures >= quarantine_threshold and not first_retry_eligible:
+                self._metrics.incr("quarantined")
+                raise QuarantineError(last_error)
+
+            if attempt == total_attempts - 1:
                 raise ValidationError(last_error, retryable=False)
-            time.sleep(backoff)
-            backoff *= 2
+
+            if backoff > 0 and attempt < total_attempts - 1:
+                time.sleep(backoff)
+                backoff *= 2
+
+        self._metrics.incr("quarantined")
         raise QuarantineError(last_error or "LLM response quarantined")
 
     def _merge_options(self, options: LLMOptions) -> LLMOptions:
@@ -130,11 +167,20 @@ class LLMClient:
             "seed": self._settings.random_seed,
             "timeout_seconds": self._settings.request_timeout_seconds,
             "retry_attempts": self._settings.retry_attempts,
+            "top_p": self._settings.nucleus_top_p,
+            "json_mode": self._settings.json_mode,
         }
         payload = {k: v for k, v in defaults.items() if v is not None}
         provided = options.model_dump(exclude_none=True)
         payload.update(provided)
         return LLMOptions.model_validate(payload)
+
+    @staticmethod
+    def _build_constrained_prompt(rendered_prompt: str, schema_hint: str) -> str:
+        constraint = f"Only return JSON conforming to schema: {schema_hint}."
+        if rendered_prompt.rstrip().endswith(constraint):
+            return rendered_prompt
+        return f"{rendered_prompt}\n\n{constraint}"
 
     def _response_meta(
         self,
@@ -156,15 +202,64 @@ class LLMClient:
         return meta
 
 
-def run(
-    client: LLMClient,
-    prompt_key: str,
-    variables: Dict[str, Any],
-    options: Optional[LLMOptions] = None,
-) -> LLMResponse:
-    """Convenience wrapper mirroring the core interface."""
+_DEFAULT_CLIENT_LOCK = threading.Lock()
+_DEFAULT_CLIENT: Optional[LLMClient] = None
 
+
+def get_default_client(
+    *, config_path: Optional[Path] = None, force_reload: bool = False
+) -> LLMClient:
+    """Return a lazily constructed singleton LLMClient bound to default policies."""
+
+    global _DEFAULT_CLIENT
+    if force_reload:
+        with _DEFAULT_CLIENT_LOCK:
+            _DEFAULT_CLIENT = _build_default_client(config_path)
+            return _DEFAULT_CLIENT
+    if _DEFAULT_CLIENT is None:
+        with _DEFAULT_CLIENT_LOCK:
+            if _DEFAULT_CLIENT is None:
+                _DEFAULT_CLIENT = _build_default_client(config_path)
+    return _DEFAULT_CLIENT
+
+
+def run(prompt_key: str, variables: Dict[str, Any], options: Optional[LLMOptions] = None) -> LLMResponse:
+    """Execute a prompt using the default DSPy-backed LLM client."""
+
+    client = get_default_client()
     return client.run(prompt_key=prompt_key, variables=variables, options=options)
 
 
-__all__ = ["LLMClient", "run"]
+def _build_default_client(config_path: Optional[Path]) -> LLMClient:
+    project_root = Path(__file__).resolve().parents[3]
+    config_file = Path(config_path) if config_path is not None else project_root / "config" / "default.yaml"
+    policies = load_policies(config_file)
+    settings = policies.llm
+
+    registry_file = (project_root / settings.registry.file).resolve()
+    templates_root = (project_root / settings.registry.templates_root).resolve()
+    schema_root = (project_root / settings.registry.schema_root).resolve()
+
+    settings.registry.file = str(registry_file)
+    settings.registry.templates_root = str(templates_root)
+    settings.registry.schema_root = str(schema_root)
+
+    registry = PromptRegistry(registry_file=registry_file, hot_reload=settings.registry.hot_reload)
+    validator = JSONValidator(schema_base_path=schema_root)
+
+    try:
+        provider_manager = build_provider_manager(settings)
+    except ProviderError as exc:  # pragma: no cover - exercised when DSPy missing
+        raise RuntimeError("Failed to initialize DSPy provider integration") from exc
+
+    metrics = MetricsCollector()
+    return LLMClient(
+        settings=settings,
+        registry=registry,
+        provider_manager=provider_manager,
+        validator=validator,
+        metrics=metrics,
+    )
+
+
+__all__ = ["LLMClient", "run", "get_default_client"]

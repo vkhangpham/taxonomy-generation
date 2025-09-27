@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import time
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, Optional
@@ -9,6 +10,9 @@ from typing import Any, Callable, Dict, Optional
 from .models import LLMOptions, ProviderError, ProviderResponse, TokenUsage
 
 ProviderCallable = Callable[[str, Dict[str, Any]], ProviderResponse]
+
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -24,11 +28,18 @@ class ProviderProfile:
 class ProviderManager:
     """Manage multiple provider profiles and apply deterministic overrides."""
 
-    def __init__(self, *, default_profile: str, profiles: Dict[str, ProviderProfile]) -> None:
+    def __init__(
+        self,
+        *,
+        default_profile: str,
+        profiles: Dict[str, ProviderProfile],
+        policy_defaults: Optional[Dict[str, Any]] = None,
+    ) -> None:
         if default_profile not in profiles:
             raise ValueError(f"Unknown default profile '{default_profile}'")
         self._profiles = dict(profiles)
         self._active_profile = default_profile
+        self._policy_defaults: Dict[str, Any] = dict(policy_defaults or {})
 
     @property
     def active_profile(self) -> str:
@@ -65,8 +76,12 @@ class ProviderManager:
         response.model = profile.model
         return response
 
-    @staticmethod
-    def _build_payload(*, prompt: str, profile: ProviderProfile, options: LLMOptions) -> Dict[str, Any]:
+    def configure_policy_defaults(self, **defaults: Any) -> None:
+        """Update deterministic policy defaults used during payload construction."""
+
+        self._policy_defaults.update({k: v for k, v in defaults.items() if v is not None})
+
+    def _build_payload(self, *, prompt: str, profile: ProviderProfile, options: LLMOptions) -> Dict[str, Any]:
         payload: Dict[str, Any] = {
             "prompt": prompt,
             "model": profile.model,
@@ -84,7 +99,129 @@ class ProviderManager:
             payload["stop"] = list(options.stop)
         if options.retry_attempts is not None:
             payload["retry_attempts"] = options.retry_attempts
+        if options.top_p is not None:
+            payload["top_p"] = options.top_p
+        elif "top_p" in self._policy_defaults:
+            payload["top_p"] = self._policy_defaults["top_p"]
+        if options.json_mode is not None:
+            payload["json_mode"] = options.json_mode
+        elif "json_mode" in self._policy_defaults:
+            payload["json_mode"] = self._policy_defaults["json_mode"]
         return payload
 
 
-__all__ = ["ProviderManager", "ProviderProfile"]
+class DSPyProviderAdapter:
+    """Callable adapter translating taxonomy payloads to DSPy LM invocations."""
+
+    SUPPORTED_PROVIDERS = {"openai", "azure_openai"}
+
+    def __init__(self, *, provider: str, model: str) -> None:
+        self._provider = provider
+        self._model = model
+        self._client = self._build_client()
+
+    def __call__(self, prompt: str, payload: Dict[str, Any]) -> ProviderResponse:
+        params = dict(payload)
+        params.pop("prompt", None)
+        params.pop("provider", None)
+        params.pop("model", None)
+
+        # Translate taxonomy options into DSPy/OpenAI keywords.
+        if "max_output_tokens" in params:
+            params["max_tokens"] = params.pop("max_output_tokens")
+        if params.pop("json_mode", False):
+            params.setdefault("response_format", {"type": "json_object"})
+
+        try:
+            raw_response = self._client(prompt=prompt, **params)
+        except ProviderError:
+            raise
+        except Exception as exc:  # pragma: no cover - defensive guard
+            raise ProviderError(str(exc), retryable=True) from exc
+
+        content = self._extract_text(raw_response)
+        usage = self._extract_usage(raw_response)
+        return ProviderResponse(content=content, usage=usage)
+
+    def _build_client(self):  # type: ignore[return-any]
+        try:
+            import dspy  # type: ignore
+        except ImportError as exc:  # pragma: no cover - exercised in environments without DSPy
+            raise ProviderError(
+                "DSPy integration requires the 'dspy-ai' package to be installed",
+                retryable=False,
+            ) from exc
+
+        provider_key = self._provider.lower()
+        if provider_key not in self.SUPPORTED_PROVIDERS:
+            raise ProviderError(f"Unsupported DSPy provider '{self._provider}'", retryable=False)
+
+        backend_cls = getattr(dspy, "OpenAI" if provider_key == "openai" else "AzureOpenAI", None)
+        if backend_cls is None:
+            raise ProviderError(f"DSPy backend for provider '{self._provider}' is unavailable", retryable=False)
+
+        logger.debug("Initializing DSPy backend", extra={"provider": self._provider, "model": self._model})
+        return backend_cls(model=self._model)
+
+    @staticmethod
+    def _extract_text(raw_response: Any) -> str:
+        if raw_response is None:
+            raise ProviderError("DSPy backend returned no response", retryable=True)
+        if isinstance(raw_response, str):
+            return raw_response
+        if hasattr(raw_response, "text"):
+            return getattr(raw_response, "text")
+        if hasattr(raw_response, "completion"):
+            completion = getattr(raw_response, "completion")
+            if isinstance(completion, str):
+                return completion
+        if isinstance(raw_response, dict):
+            for key in ("text", "completion", "content"):
+                if key in raw_response and isinstance(raw_response[key], str):
+                    return raw_response[key]
+        return str(raw_response)
+
+    @staticmethod
+    def _extract_usage(raw_response: Any) -> TokenUsage:
+        usage = TokenUsage()
+        usage_data = None
+        if hasattr(raw_response, "usage"):
+            usage_data = getattr(raw_response, "usage")
+        elif isinstance(raw_response, dict):
+            usage_data = raw_response.get("usage")
+        if isinstance(usage_data, dict):
+            usage.prompt_tokens = int(usage_data.get("prompt_tokens", usage.prompt_tokens))
+            usage.completion_tokens = int(usage_data.get("completion_tokens", usage.completion_tokens))
+        return usage
+
+
+def build_provider_manager(settings) -> ProviderManager:
+    """Construct a ProviderManager using DSPy adapters from policy settings."""
+
+    from ..config.policies import LLMDeterminismSettings  # local import to avoid cycles
+
+    if not isinstance(settings, LLMDeterminismSettings):
+        raise TypeError("settings must be an instance of LLMDeterminismSettings")
+
+    profiles: Dict[str, ProviderProfile] = {}
+    for name, profile_settings in settings.profiles.items():
+        adapter = DSPyProviderAdapter(provider=profile_settings.provider, model=profile_settings.model)
+        profiles[name] = ProviderProfile(
+            name=name,
+            model=profile_settings.model,
+            provider=profile_settings.provider,
+            call=adapter,
+        )
+
+    manager = ProviderManager(
+        default_profile=settings.default_profile,
+        profiles=profiles,
+        policy_defaults={
+            "top_p": settings.nucleus_top_p,
+            "json_mode": settings.json_mode,
+        },
+    )
+    return manager
+
+
+__all__ = ["ProviderManager", "ProviderProfile", "DSPyProviderAdapter", "build_provider_manager"]
