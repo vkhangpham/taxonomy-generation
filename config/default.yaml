@@ -70,6 +70,25 @@ policies:
     retry_backoff_seconds: 2.0
     random_seed: 12345
     token_budget: 4096
+    request_timeout_seconds: 30.0
+    default_profile: standard
+    profiles:
+      standard:
+        provider: openai
+        model: gpt-4o-mini
+    registry:
+      file: prompts/registry.yaml
+      templates_root: prompts
+      schema_root: prompts
+      hot_reload: false
+    repair:
+      quarantine_after_attempts: 3
+    observability:
+      metrics_enabled: true
+      audit_logging: false
+    cost_tracking:
+      token_budget_per_hour: 20000
+      enabled: false
   deduplication:
     thresholds:
       l0_l1: 0.93

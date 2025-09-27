@@ -1,0 +1,35 @@
+schema_version: 1
+prompts:
+  taxonomy.extract:
+    active_variant: v1
+    variants:
+      v1:
+        description: "Extract taxonomy candidate labels from institutional text."
+        template: templates/extraction.jinja2
+        schema: schemas/extraction.json
+        enforce_order_by: normalized
+        optimization_history: []
+  taxonomy.verify_single_token:
+    active_variant: v1
+    variants:
+      v1:
+        description: "Verify that a canonical label is a minimal single-token form."
+        template: templates/verification.jinja2
+        schema: schemas/verification.json
+        optimization_history: []
+  taxonomy.disambiguate:
+    active_variant: v1
+    variants:
+      v1:
+        description: "Disambiguate identical surface forms into distinct senses."
+        template: templates/disambiguation.jinja2
+        schema: schemas/disambiguation.json
+        optimization_history: []
+  taxonomy.validate:
+    active_variant: v1
+    variants:
+      v1:
+        description: "Validate taxonomy concepts against supporting evidence."
+        template: templates/validation.jinja2
+        schema: schemas/validation.json
+        optimization_history: []

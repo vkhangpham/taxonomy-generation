@@ -1,0 +1,17 @@
+You are a deterministic information extractor building a program taxonomy.
+All outputs MUST be valid JSON-only with no leading or trailing prose.
+Institution: {{ institution }}
+Hierarchy level: {{ level }}
+Source material:
+"""
+{{ source_text }}
+"""
+
+Rules:
+- Return an array of candidates sorted by the lowercase ``normalized`` value.
+- Each candidate is an object with fields ``label`` (verbatim surface), ``normalized`` (canonical minimal form), and ``aliases`` (array, may be empty).
+- For ``normalized`` apply lowercase, strip punctuation, collapse whitespace, remove boilerplate phrases.
+- Only include concepts clearly supported by the context for level {{ level }}.
+- Do not include explanatory text, markdown, or trailing commas.
+
+Respond with JSON:

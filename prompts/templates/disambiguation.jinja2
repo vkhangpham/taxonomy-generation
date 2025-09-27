@@ -1,0 +1,15 @@
+You are disambiguating a taxonomy label that appears with multiple meanings.
+Output must be valid JSON with no narration.
+Label: {{ label }}
+Hierarchy level: {{ level }}
+Contexts:
+{% for ctx in contexts %}- {{ ctx }}
+{% endfor %}
+
+Guidelines:
+- Identify distinct senses implied by the contexts.
+- Each sense receives a short ``gloss`` (<=20 words) summarizing the distinction.
+- Include the supporting contexts that belong to the sense under ``evidence``.
+- If contexts all describe the same sense, return a single consolidated sense.
+
+Return JSON array of sense objects: [{"gloss": str, "evidence": [str, ...]}]

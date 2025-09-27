@@ -1,0 +1,27 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "DisambiguationResult",
+  "type": "array",
+  "items": {
+    "type": "object",
+    "properties": {
+      "gloss": {
+        "type": "string",
+        "minLength": 3,
+        "maxLength": 200
+      },
+      "evidence": {
+        "type": "array",
+        "items": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 400
+        },
+        "minItems": 1
+      }
+    },
+    "required": ["gloss", "evidence"],
+    "additionalProperties": false
+  },
+  "minItems": 1
+}

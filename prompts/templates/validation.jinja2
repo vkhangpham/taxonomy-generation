@@ -1,0 +1,14 @@
+You are validating whether a taxonomy concept is supported by referenced evidence.
+All outputs must be JSON only.
+Concept: {{ concept }}
+Hierarchy level: {{ level }}
+Evidence:
+{% for item in evidence %}- {{ item.source }} :: {{ item.summary }}
+{% endfor %}
+
+Instructions:
+- Accept only if evidence directly entails the concept at the specified level.
+- Prefer authoritative or primary institutional sources.
+- Provide a concise rationale citing the strongest piece of evidence.
+
+Respond with JSON object: {"validated": true|false, "reason": "short justification"}

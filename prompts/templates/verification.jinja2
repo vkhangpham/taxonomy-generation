@@ -1,0 +1,16 @@
+You are validating the minimal canonical label for a taxonomy concept.
+All outputs MUST be valid JSON-only with no commentary.
+Label under review: {{ label }}
+Hierarchy level: {{ level }}
+
+Validation checklist:
+- The label must be a single token unless policy allows hyphenated compounds.
+- Prefer shortest canonical form that remains unambiguous for level {{ level }}.
+- Reject boilerplate descriptors (e.g., "Department of", "Program in").
+- Preserve institutional acronyms if they are the only distinctive token.
+
+Respond with a JSON object containing:
+{
+  "pass": <true|false>,
+  "reason": "concise factual justification"
+}

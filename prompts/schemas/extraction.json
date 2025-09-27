@@ -1,0 +1,33 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ExtractionCandidates",
+  "type": "array",
+  "items": {
+    "type": "object",
+    "properties": {
+      "label": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 128
+      },
+      "normalized": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 128
+      },
+      "aliases": {
+        "type": "array",
+        "items": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "default": [],
+        "uniqueItems": true
+      }
+    },
+    "required": ["label", "normalized"],
+    "additionalProperties": false
+  },
+  "uniqueItems": true
+}
