@@ -30,7 +30,18 @@ from taxonomy.entities.core import PageSnapshot, PageSnapshotMeta
 from taxonomy.utils.logging import get_logger
 
 from .models import ContentMetadata, QualityMetrics
-from .utils import clean_text, generate_checksum, normalize_url
+from .utils import canonicalize_url, clean_text, generate_checksum, normalize_url
+
+
+class ContentPolicyError(Exception):
+    """Raised when extracted content violates configured processing policies."""
+
+    def __init__(self, reason: str, message: str) -> None:
+        super().__init__(message)
+        self.reason = reason
+
+    def __repr__(self) -> str:  # pragma: no cover - debugging helper
+        return f"ContentPolicyError(reason={self.reason!r}, message={self.args[0]!r})"
 
 
 _CANONICAL_PATTERNS = (
@@ -52,11 +63,13 @@ class ContentProcessor:
         self,
         *,
         language_allowlist: Iterable[str] | None = None,
+        language_confidence_threshold: float = 0.0,
         min_text_length: int = 120,
         pdf_extraction_enabled: bool = True,
         pdf_size_limit_mb: int = 5,
     ) -> None:
         self.language_allowlist = {code.lower() for code in language_allowlist or []}
+        self.language_confidence_threshold = max(0.0, min(1.0, float(language_confidence_threshold)))
         self.min_text_length = min_text_length
         self.pdf_extraction_enabled = pdf_extraction_enabled
         self.pdf_size_limit_mb = pdf_size_limit_mb
@@ -76,7 +89,7 @@ class ContentProcessor:
         best = max(langs, key=lambda item: item.prob)
         return LanguageDetectionResult(language=best.lang.lower(), confidence=float(best.prob))
 
-    def _extract_text_from_html(self, html: str) -> Tuple[str, str | None]:
+    def _extract_text_from_html(self, html: str, base_url: str | None = None) -> Tuple[str, str | None]:
         if BeautifulSoup is None:
             cleaned = clean_text(re.sub(r"<[^>]+>", " ", html))
             return cleaned, None
@@ -89,7 +102,7 @@ class ContentProcessor:
             candidate = soup.find(tag, attrs={attr: expected})
             if candidate and candidate.has_attr(value_attr):
                 try:
-                    canonical = normalize_url(candidate[value_attr])
+                    canonical = canonicalize_url(candidate[value_attr], base=base_url)
                     break
                 except Exception:  # pragma: no cover - normalised failure
                     continue
@@ -145,14 +158,37 @@ class ContentProcessor:
                 payload = payload.encode("utf-8")
 
         if "pdf" in content_type:
+            payload_bytes = payload if isinstance(payload, bytes) else payload.encode("utf-8")
+            if self.pdf_size_limit_mb and len(payload_bytes) > self.pdf_size_limit_mb * 1024 * 1024:
+                raise ContentPolicyError(
+                    "pdf_size_limit",
+                    f"PDF payload {len(payload_bytes)} bytes exceeds limit of {self.pdf_size_limit_mb} MB",
+                )
             text = self._extract_text_from_pdf(payload if isinstance(payload, bytes) else payload.encode("utf-8"))
         elif html is not None:
-            text, canonical_url = self._extract_text_from_html(html)
+            text, canonical_url = self._extract_text_from_html(html, base_url=url)
         else:
             text = clean_text(payload.decode("utf-8", errors="ignore")) if isinstance(payload, bytes) else clean_text(payload)
 
         detection = self._detect_language(text)
         language = self._enforce_language_policy(detection)
+
+        if self.min_text_length and len(text) < self.min_text_length:
+            raise ContentPolicyError(
+                "min_text_length",
+                f"Extracted text length {len(text)} below minimum {self.min_text_length}",
+            )
+
+        if (
+            self.language_allowlist
+            and detection.language
+            and detection.language not in self.language_allowlist
+            and detection.confidence >= self.language_confidence_threshold
+        ):
+            raise ContentPolicyError(
+                "language_allowlist",
+                f"Detected language {detection.language} not in allowlist {sorted(self.language_allowlist)}",
+            )
 
         checksum = generate_checksum(text)
         quality = QualityMetrics(
@@ -193,4 +229,4 @@ class ContentProcessor:
         return snapshot, content_meta
 
 
-__all__ = ["ContentProcessor", "LanguageDetectionResult"]
+__all__ = ["ContentProcessor", "LanguageDetectionResult", "ContentPolicyError"]

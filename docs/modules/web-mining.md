@@ -4,8 +4,8 @@ Purpose
 - Acquire institutional content safely and efficiently, producing normalized page snapshots for downstream S0 segmentation.
 
 Core Tech
-- Firecrawl v2.0 (SDK/API) as the unified fetch/render/crawl layer; no custom scrapers or browser automation.
-- Built-in JS rendering for client-side apps; configurable timeouts and concurrency.
+- Firecrawl v2 `scrape` API as the unified fetch/render/crawl layer; no custom scrapers or browser automation.
+- Adaptive JS rendering fallback: perform a lightweight fetch first, then re-fetch with rendering when HTML is empty/client-side; mark snapshots as `meta.rendered=true`.
 - Snapshot caching with TTL and checksum-based dedup to minimize re-fetching.
 
 Scope
@@ -17,12 +17,13 @@ Inputs/Outputs (semantic)
 
 Rules & Invariants
 - Robots and ethics: respect robots.txt and no-login/no-paywall constraints; abort on disallow.
-- Politeness: rate limits, concurrency caps, exponential backoff on errors.
+- Politeness: rate limits, concurrency caps, and optional crawl-delay compliance (respect robots delay only when `respect_crawl_delay` is true).
 - Budgets: enforce per-institution caps (pages, depth, time, content size); stop cleanly when exceeded.
 - Canonicalization: prefer canonical_url from <link rel="canonical">; normalize querystrings; consolidate trailing slashes.
-- Deduplication: collapse snapshots with identical checksums across URLs; keep first seen; record alias_urls.
-- Rendering: enable JS rendering only when needed (heuristics: empty body, heavy client-side apps).
-- PDF/Docs: optionally extract text from PDFs when linked from allowed domains; record content_type and text origin; skip large binaries by size limit.
+- Deduplication: collapse snapshots with identical checksums across URLs; keep first seen; persist `meta.alias_urls` with every alias.
+- Rendering: enable JS rendering only when needed (heuristics: empty body, heavy client-side apps) and mark `meta.rendered=true` on rendered snapshots.
+- PDF/Docs: optionally extract text from PDFs; enforce `pdf_size_limit_mb` before parsing to avoid oversized payloads.
+- Content Policy: enforce `min_text_length` and language allowlists (with confidence thresholds); violations raise `content_policy` crawl errors and skip the page.
 
 Core Logic
 - Discovery
@@ -30,17 +31,19 @@ Core Logic
   - BFS by default with depth limit; prioritize URLs matching include patterns (e.g., "/departments", "/research").
   - Skip disallowed_paths and external domains unless explicitly whitelisted.
 - Content Processing
-  - Extract main text (readability heuristics) while keeping simple list structure markers.
-  - Detect language; drop non-target languages unless specifically allowed for that institution.
+  - Extract main text (readability heuristics) while keeping simple list structure markers and resolving canonical URLs relative to the page base.
+  - Detect language; enforce allowlists using the configured confidence threshold, raising `content_policy` errors for violations.
+  - Enforce minimum text length and PDF size limits; skip pages with insufficient content via `content_policy` errors.
   - Compute checksum over normalized text; store small excerpt for debugging.
 - Dedup & Caching
   - Before fetch: consult cache by URL and TTL; short-circuit if fresh.
   - After fetch: check checksum-based dedup to avoid downstream duplication.
 
 Failure Handling
-- HTTP errors/timeouts → retry with backoff up to N attempts; record last error.
+- HTTP errors/timeouts → retry with backoff up to the configured attempt budget; classify crawl errors as retryable.
 - robots.txt blocks → do not fetch; mark robots_blocked and continue.
-- Excessive redirects or content size → abort fetch, record reason, skip URL.
+- Excessive redirects or declared content size over budget → abort fetch early and record `content_policy` errors.
+- Content policy violations (language, min text, PDF size) → raise `content_policy` crawl errors and continue without snapshot.
 
 Observability
 - Counters: urls_queued, urls_fetched, robots_blocked, errors, rendered, deduped, pdf_extracted.
@@ -51,6 +54,8 @@ Acceptance Tests
 - Given seeds for three institutions, crawler stops at max_pages and max_depth while respecting robots.txt.
 - Duplicate content under different URLs collapses to one snapshot with alias_urls recorded.
 - Client-side page with empty initial HTML triggers rendered=true with non-empty text.
+- Pages below `min_text_length` or in disallowed languages surface `content_policy` errors and are excluded from snapshots.
+- When `respect_crawl_delay` is false, robots crawl-delay hints are ignored; when true, the crawler sleeps accordingly.
 
 Examples
 - Example A: Seed configuration
@@ -81,7 +86,7 @@ Examples
     "text": "Departments\nComputer Science\nElectrical & Computer Engineering",
     "lang": "en",
     "checksum": "sha256:abcd...",
-    "meta": {"rendered": false, "source": "provider"}
+    "meta": {"rendered": false, "source": "provider", "alias_urls": ["https://u1.edu/engineering/departments"]}
   }
   ```
 

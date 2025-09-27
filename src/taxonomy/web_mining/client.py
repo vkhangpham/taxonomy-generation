@@ -10,21 +10,61 @@ from datetime import datetime, timezone
 from typing import Iterable, List, Optional, Sequence
 
 import requests
+from requests import Response
+from requests.exceptions import RequestException
 
 try:  # pragma: no cover - optional dependency
-    from firecrawl import FirecrawlApp
+    from firecrawl.v2 import FirecrawlClient
+    from firecrawl.v2.types import Document
 except Exception:  # pragma: no cover - fallback path
-    FirecrawlApp = None
+    FirecrawlClient = None  # type: ignore[assignment]
+    Document = None  # type: ignore[assignment]
 
 from taxonomy.entities.core import PageSnapshot
 from taxonomy.utils.logging import get_logger
 
 from .cache import CacheManager
-from .content import ContentProcessor
+from .content import ContentPolicyError, ContentProcessor
 from .models import CrawlConfig, CrawlError, CrawlResult, CrawlSession, URLQueueEntry
 from .observability import MetricsCollector
 from .robots import RobotsChecker
-from .utils import RateLimiter, canonicalize_url, should_follow, within_content_budget
+from .utils import RateLimiter, canonicalize_url, retryable, should_follow, within_content_budget
+
+
+class FetchError(Exception):
+    """Exception raised when a network fetch fails."""
+
+    def __init__(self, message: str, *, retryable: bool = True) -> None:
+        super().__init__(message)
+        self.retryable = retryable
+
+
+def _document_html(document: Document | None) -> bytes:
+    if document is None:
+        return b""
+    html = document.html or document.raw_html or document.markdown or ""
+    if isinstance(html, str):
+        return html.encode("utf-8")
+    return html
+
+
+def _should_render(body: bytes, content_type: str) -> bool:
+    if "html" not in content_type:
+        return False
+    text = body.decode("utf-8", errors="ignore")
+    if not text.strip():
+        return True
+    lowered = text.lower()
+    client_side_markers = (
+        "<script",
+        "id=\"app",
+        "id='app",
+        "data-reactroot",
+        "ng-app",
+        "id=\"root",
+        "id='root",
+    )
+    return len(text.strip()) < 256 and any(marker in lowered for marker in client_side_markers)
 
 
 @dataclass
@@ -60,10 +100,14 @@ class WebMiner:
         self.user_agent = user_agent
         self.rate_limiter = RateLimiter(rate_per_second=rate_limit_per_sec, burst=max_concurrency)
         self._logger = get_logger(component="web_miner", user_agent=user_agent)
-        self._firecrawl = None
-        if FirecrawlApp is not None and (firecrawl_api_key or os.getenv("FIRECRAWL_API_KEY")):
+        self._firecrawl: FirecrawlClient | None = None
+        if FirecrawlClient is not None and (firecrawl_api_key or os.getenv("FIRECRAWL_API_KEY")):
             api_key = firecrawl_api_key or os.getenv("FIRECRAWL_API_KEY")
-            self._firecrawl = FirecrawlApp(api_key=api_key, base_url=firecrawl_endpoint)
+            timeout = None
+            if firecrawl_endpoint:
+                self._firecrawl = FirecrawlClient(api_key=api_key, api_url=firecrawl_endpoint, timeout=timeout)
+            else:
+                self._firecrawl = FirecrawlClient(api_key=api_key, timeout=timeout)
 
     def crawl_institution(self, config: CrawlConfig) -> CrawlResult:
         metrics = MetricsCollector(config.institution_id)
@@ -93,7 +137,7 @@ class WebMiner:
                 metrics.record_fetch(robots_blocked=True)
                 continue
             crawl_delay = self.robots_checker.crawl_delay(url) if config.respect_robots else None
-            if crawl_delay:
+            if crawl_delay and config.respect_crawl_delay:
                 time.sleep(crawl_delay)
 
             cached_snapshot = self.cache.get(url)
@@ -107,8 +151,20 @@ class WebMiner:
             metrics.record_cache_miss()
             try:
                 fetch_response = self._fetch_url(url, config)
-            except Exception as exc:
-                error = CrawlError(url=url, error_type="fetch", detail=str(exc), retryable=True)
+            except ContentPolicyError as exc:
+                error = CrawlError(url=url, error_type="content_policy", detail=str(exc), retryable=False)
+                session.record_error(error)
+                result.add_error(error)
+                metrics.record_error("content_policy")
+                continue
+            except FetchError as exc:
+                error = CrawlError(url=url, error_type="fetch", detail=str(exc), retryable=exc.retryable)
+                session.record_error(error)
+                result.add_error(error)
+                metrics.record_error("fetch")
+                continue
+            except Exception as exc:  # pragma: no cover - defensive catch
+                error = CrawlError(url=url, error_type="fetch", detail=str(exc), retryable=False)
                 session.record_error(error)
                 result.add_error(error)
                 metrics.record_error("fetch")
@@ -131,6 +187,12 @@ class WebMiner:
                     robots_blocked=False,
                     redirects=fetch_response.redirects,
                 )
+            except ContentPolicyError as exc:
+                error = CrawlError(url=url, error_type="content_policy", detail=str(exc), retryable=False)
+                session.record_error(error)
+                result.add_error(error)
+                metrics.record_error("content_policy")
+                continue
             except Exception as exc:
                 error = CrawlError(url=url, error_type="content", detail=str(exc), retryable=False)
                 session.record_error(error)
@@ -174,35 +236,101 @@ class WebMiner:
     def _fetch_url(self, url: str, config: CrawlConfig) -> FetchResponse:
         self.rate_limiter.acquire()
         headers = {"User-Agent": self.user_agent}
-        redirects: List[str] = []
         fetched_at = datetime.now(timezone.utc)
+        retries = getattr(config, "retry_attempts", 3)
 
-        if self._firecrawl is not None:
-            response = self._firecrawl.get_url(url, params={"timeout": int(config.page_timeout_seconds * 1000)})
-            status_code = response.get("status_code", 200)
-            content_type = response.get("headers", {}).get("content-type", "text/html")
-            body = response.get("content", "").encode("utf-8")
-            redirects = response.get("redirects", [])
-            rendered = response.get("rendered", False)
-        else:
-            resp = requests.get(url, headers=headers, timeout=config.page_timeout_seconds)
-            status_code = resp.status_code
-            content_type = resp.headers.get("content-type", "text/html")
-            body = resp.content
-            redirects = [r.url for r in getattr(resp, "history", []) if getattr(r, "url", None)]
-            if getattr(resp, "url", None) and resp.url != url:
-                redirects.append(resp.url)
-            rendered = False
+        def issue_request() -> Response:
+            return requests.get(
+                url,
+                headers=headers,
+                timeout=config.page_timeout_seconds,
+                stream=True,
+                allow_redirects=True,
+            )
+
+        try:
+            response = retryable(issue_request, retries=retries)
+        except RequestException as exc:
+            raise FetchError(f"Request failed for {url}: {exc}", retryable=True) from exc
+        except Exception as exc:  # pragma: no cover - defensive
+            raise FetchError(f"Fetch failed for {url}: {exc}", retryable=False) from exc
+
+        try:
+            content_type_header = response.headers.get("content-type", "text/html")
+            content_type = content_type_header.split(";")[0].lower()
+            content_length_header = response.headers.get("content-length")
+            if content_length_header:
+                try:
+                    declared_length = int(content_length_header)
+                except ValueError:
+                    declared_length = None
+                else:
+                    if not within_content_budget(declared_length, config.max_content_size_mb):
+                        raise ContentPolicyError(
+                            "content_length",
+                            f"Content-Length {declared_length} exceeds limit {config.max_content_size_mb} MB",
+                        )
+            body = response.content
+            redirects = [r.url for r in getattr(response, "history", []) if getattr(r, "url", None)]
+            final_url = response.url or url
+            if final_url != url:
+                redirects.append(final_url)
+        finally:
+            response.close()
+
+        rendered = False
+        final_body = body
+        final_content_type = content_type
+        status_code = response.status_code
+        try:
+            final_url = canonicalize_url(final_url)
+        except Exception:
+            final_url = canonicalize_url(url)
+        normalized_redirects: List[str] = []
+        for link in redirects:
+            if not link:
+                continue
+            try:
+                normalized_redirects.append(canonicalize_url(link))
+            except Exception:  # pragma: no cover - ignore malformed redirect
+                continue
+        redirects = normalized_redirects
+
+        document: Document | None = None
+        if self._firecrawl is not None and _should_render(body, content_type):
+            def render_operation() -> Document:
+                timeout = int(max(1, round(config.render_timeout_seconds)))
+                return self._firecrawl.scrape(url, timeout=timeout)
+
+            try:
+                document = retryable(render_operation, retries=retries)
+            except Exception as exc:  # pragma: no cover - rendering failures are logged
+                self._logger.warning("Firecrawl render failed", url=url, error=str(exc))
+            else:
+                rendered_body = _document_html(document)
+                if rendered_body.strip():
+                    rendered = True
+                    final_body = rendered_body
+                    final_content_type = (document.metadata.content_type if document and document.metadata else None) or "text/html"
+                    final_content_type = final_content_type.split(";")[0].lower()
+                    if document and document.metadata and document.metadata.url:
+                        try:
+                            final_url = canonicalize_url(document.metadata.url)
+                        except Exception:  # pragma: no cover - defensive
+                            pass
+                    if document and document.metadata and document.metadata.status_code:
+                        status_code = document.metadata.status_code
+                    fetched_at = datetime.now(timezone.utc)
 
         return FetchResponse(
-            url=url,
+            url=final_url,
             status_code=status_code,
-            content_type=content_type.split(";")[0].lower(),
-            body=body,
+            content_type=final_content_type,
+            body=final_body,
             rendered=rendered,
-            redirects=[link for link in redirects if link],
+            redirects=redirects,
             fetched_at=fetched_at,
-            bytes_downloaded=len(body),
+            bytes_downloaded=len(final_body),
         )
 
     def _discover_links(self, html: str, base_url: str) -> Sequence[str]:

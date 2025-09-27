@@ -279,6 +279,10 @@ class PageSnapshotMeta(BaseModel):
 
     rendered: bool = Field(default=False, description="Whether headless rendering was required")
     robots_blocked: bool = Field(default=False, description="Whether the fetch was blocked by robots.txt")
+    alias_urls: List[str] = Field(
+        default_factory=list,
+        description="Canonicalized URLs that share the same content checksum.",
+    )
     redirects: List[str] = Field(
         default_factory=list,
         description="Ordered list of redirect URLs that occurred before the final fetch.",
@@ -293,6 +297,12 @@ class PageSnapshotMeta(BaseModel):
     @classmethod
     def _validate_redirects(cls, value: List[str]) -> List[str]:
         return [_normalize_url(item) for item in value]
+
+    @field_validator("alias_urls")
+    @classmethod
+    def _validate_aliases(cls, value: List[str]) -> List[str]:
+        normalized = [_normalize_url(item) for item in value]
+        return sorted(dict.fromkeys(normalized))
 
     @field_validator("source")
     @classmethod

@@ -95,6 +95,7 @@ class CacheManager:
                 self._stats["misses"] += 1
                 return None
             self._stats["hits"] += 1
+            snapshot.meta.alias_urls = sorted(set(entry.alias_urls))
             return snapshot
 
     def store(self, snapshot: PageSnapshot) -> None:
@@ -119,6 +120,9 @@ class CacheManager:
                 )
                 self._index[snapshot.url] = entry
                 self._checksum_index[snapshot.checksum] = entry
+            for alias in entry.alias_urls:
+                self._index[alias] = entry
+            snapshot.meta.alias_urls = sorted(set(entry.alias_urls))
             snapshot_path = self._snapshot_path(snapshot.checksum)
             snapshot_path.write_text(json.dumps(snapshot.model_dump(mode="json"), indent=2))
             self._maybe_cleanup_locked(now)

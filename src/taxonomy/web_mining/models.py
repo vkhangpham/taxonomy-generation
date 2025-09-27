@@ -145,10 +145,12 @@ class CrawlConfig(BaseModel):
     max_depth: int = Field(default=3, ge=0)
     ttl_days: int = Field(default=14, ge=0)
     respect_robots: bool = Field(default=True)
+    respect_crawl_delay: bool = Field(default=True)
     page_timeout_seconds: float = Field(default=20.0, ge=1.0)
     render_timeout_seconds: float = Field(default=15.0, ge=1.0)
     crawl_time_budget_minutes: int = Field(default=30, ge=1)
     max_content_size_mb: int = Field(default=5, ge=0)
+    retry_attempts: int = Field(default=3, ge=0)
 
     @field_validator("seed_urls")
     @classmethod

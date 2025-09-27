@@ -40,7 +40,13 @@ def is_allowed_domain(url: str, allowed_domains: Sequence[str]) -> bool:
 
     hostname = urlparse(url).hostname or ""
     hostname = hostname.lower()
-    return any(hostname.endswith(domain.lstrip(".")) for domain in allowed_domains)
+    for domain in allowed_domains:
+        normalized = domain.lower().lstrip(".")
+        if not normalized:
+            continue
+        if hostname == normalized or hostname.endswith("." + normalized):
+            return True
+    return False
 
 
 def is_disallowed_path(url: str, disallowed_paths: Sequence[str]) -> bool:
