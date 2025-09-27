@@ -9,6 +9,7 @@ import pytest
 import yaml
 from openpyxl import Workbook
 
+from taxonomy.config.policies import RawExtractionPolicy
 from taxonomy.config.settings import Settings
 from taxonomy.pipeline.s0_raw_extraction import (
     count_colleges_per_institution,
@@ -73,6 +74,7 @@ def _policy_template(excel_path: Path, *, top_n: int = 2, seed: int = 7) -> dict
             "thresholds": {"l0_l1": 0.93, "l2_l3": 0.9},
             "merge_policy": "conservative",
         },
+        "raw_extraction": RawExtractionPolicy().model_dump(),
         "level0_excel": {
             "excel_file": str(excel_path),
             "sheets_to_process": ["Sheet1"],

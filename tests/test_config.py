@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from taxonomy.config.policies import Policies, load_policies
+from taxonomy.config.policies import Policies, RawExtractionPolicy, load_policies
 from taxonomy.config.settings import Settings
 
 
@@ -67,6 +67,7 @@ def minimal_policy_dict() -> dict:
             "thresholds": {"l0_l1": 0.93, "l2_l3": 0.9},
             "merge_policy": "conservative",
         },
+        "raw_extraction": RawExtractionPolicy().model_dump(),
         "level0_excel": {
             "excel_file": "data/Faculty Extraction Report.xlsx",
             "sheets_to_process": [],

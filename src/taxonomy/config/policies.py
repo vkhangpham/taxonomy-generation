@@ -237,6 +237,53 @@ class DeduplicationPolicy(BaseModel):
     merge_policy: str = Field(default="conservative")
 
 
+class RawExtractionPolicy(BaseModel):
+    """Configuration for S0 raw extraction from mined snapshots."""
+
+    segment_on_headers: bool = Field(default=True)
+    segment_on_lists: bool = Field(default=True)
+    segment_on_tables: bool = Field(default=True)
+    preserve_list_structure: bool = Field(default=True)
+    min_chars: int = Field(default=12, ge=0)
+    max_chars: int = Field(default=2000, ge=1)
+    target_language: str = Field(default="en", min_length=1)
+    language_confidence_threshold: float = Field(default=0.8, ge=0.0, le=1.0)
+    intra_page_dedup_enabled: bool = Field(default=True)
+    similarity_threshold: float = Field(default=0.95, ge=0.0, le=1.0)
+    similarity_method: str = Field(default="jaccard_shingles", min_length=1)
+    remove_boilerplate: bool = Field(default=True)
+    boilerplate_patterns: List[str] = Field(
+        default_factory=lambda: [
+            "© \\d{4}",
+            "all rights reserved",
+            "privacy policy",
+            "terms of use",
+            "contact us",
+            "home \\| about \\| contact",
+        ]
+    )
+    detect_sections: bool = Field(default=True)
+    section_header_patterns: List[str] = Field(
+        default_factory=lambda: [
+            "^[A-Z][A-Z\\s]{2,50}:?$",
+            "^#{1,6}\\s+.+$",
+            "^\\d+\\.\\s+[A-Z].+$",
+        ]
+    )
+    preserve_document_order: bool = Field(default=True)
+
+    @field_validator("boilerplate_patterns", "section_header_patterns")
+    @classmethod
+    def _strip_blanks(cls, value: List[str]) -> List[str]:
+        return [pattern for pattern in (entry.strip() for entry in value) if pattern]
+
+    @model_validator(mode="after")
+    def _validate_length_bounds(self) -> "RawExtractionPolicy":
+        if self.max_chars and self.max_chars < self.min_chars:
+            raise ValueError("max_chars must be greater than or equal to min_chars")
+        return self
+
+
 class LevelZeroExcelPolicy(BaseModel):
     """Specialised configuration for the level 0 Excel handler."""
 
@@ -256,6 +303,7 @@ class Policies(BaseModel):
     web: WebDomainRules
     llm: LLMDeterminismSettings
     deduplication: DeduplicationPolicy
+    raw_extraction: RawExtractionPolicy
     level0_excel: LevelZeroExcelPolicy
 
     @model_validator(mode="after")
@@ -308,5 +356,6 @@ __all__ = [
     "WebDomainRules",
     "LLMDeterminismSettings",
     "DeduplicationPolicy",
+    "RawExtractionPolicy",
     "LevelZeroExcelPolicy",
 ]

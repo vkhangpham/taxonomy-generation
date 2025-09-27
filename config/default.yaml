@@ -124,6 +124,32 @@ policies:
       l0_l1: 0.93
       l2_l3: 0.9
     merge_policy: conservative
+  raw_extraction:
+    segment_on_headers: true
+    segment_on_lists: true
+    segment_on_tables: true
+    preserve_list_structure: true
+    min_chars: 12
+    max_chars: 2000
+    target_language: en
+    language_confidence_threshold: 0.8
+    intra_page_dedup_enabled: true
+    similarity_threshold: 0.95
+    similarity_method: jaccard_shingles
+    remove_boilerplate: true
+    boilerplate_patterns:
+      - '© \d{4}'
+      - 'all rights reserved'
+      - 'privacy policy'
+      - 'terms of use'
+      - 'contact us'
+      - 'home \| about \| contact'
+    detect_sections: true
+    section_header_patterns:
+      - '^[A-Z][A-Z\s]{2,50}:?$'
+      - '^#{1,6}\s+.+$'
+      - '^\d+\.\s+[A-Z].+$'
+    preserve_document_order: true
   level0_excel:
     excel_file: data/Faculty Extraction Report.xlsx
     sheets_to_process: []
