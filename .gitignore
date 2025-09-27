@@ -8,3 +8,11 @@ wheels/
 
 # Virtual environments
 .venv
+
+.traycer
+.cache
+.serena
+logs
+AGENTS.md
+.pytest_cache
+.env
