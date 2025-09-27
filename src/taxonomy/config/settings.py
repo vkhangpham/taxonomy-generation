@@ -24,7 +24,21 @@ except ImportError:  # pragma: no cover
 
 from .policies import Policies, load_policies
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
+def _find_project_root(start: Path) -> Path:
+    """Walk up the filesystem to locate the repository root via pyproject.toml."""
+
+    for candidate in [start, *start.parents]:
+        if (candidate / "pyproject.toml").exists():
+            return candidate
+    # Fallback to historical behaviour (src-layout parent) if pyproject is absent.
+    try:
+        return start.parents[2]
+    except IndexError:  # pragma: no cover - defensive fallback for shallow paths
+        return start.parent
+
+
+PROJECT_ROOT = _find_project_root(Path(__file__).resolve().parent)
 DEFAULT_CONFIG_DIR = PROJECT_ROOT / "config"
 DEFAULT_CONFIG_FILE = DEFAULT_CONFIG_DIR / "default.yaml"
 
@@ -115,7 +129,7 @@ class Settings(BaseSettings):
     config_dir: Path = Field(default=DEFAULT_CONFIG_DIR)
     paths: PathsConfig = Field(default_factory=PathsConfig)
     create_dirs: bool = Field(
-        default=True,
+        default=False,
         description="Create filesystem directories declared in `paths` during initialisation.",
     )
     random_seed: int = Field(default=20230927)
@@ -199,9 +213,9 @@ class Settings(BaseSettings):
             help="Enable debug logging via Python's logging module.",
         )
         parser.add_argument(
-            "--no-create-dirs",
+            "--create-dirs",
             action="store_true",
-            help="Do not create filesystem directories during settings initialisation.",
+            help="Create filesystem directories during settings initialisation.",
         )
 
         args = parser.parse_args(list(argv) if argv is not None else None)
@@ -214,8 +228,8 @@ class Settings(BaseSettings):
             overrides["environment"] = args.environment
         if args.config_dir:
             overrides["config_dir"] = args.config_dir
-        if args.no_create_dirs:
-            overrides["create_dirs"] = False
+        if args.create_dirs:
+            overrides["create_dirs"] = True
 
         return cls(**overrides)
 

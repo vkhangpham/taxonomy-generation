@@ -79,7 +79,12 @@ class SourceRecord(BaseModel):
 
 
 class SupportStats(BaseModel):
-    """Aggregated evidence counts for candidates and concepts."""
+    """Aggregated evidence counts for candidates and concepts.
+
+    The policy definitions in ``config/default.yaml`` refer to ``inst_count`` and
+    ``src_count``. ``inst_count`` maps to :attr:`institutions` while ``src_count``
+    corresponds to :attr:`count`, the total frequency across supporting records.
+    """
 
     records: int = Field(
         default=0,
@@ -98,9 +103,14 @@ class SupportStats(BaseModel):
     )
 
     def weight(self) -> float:
-        """Calculate the support weight using the policy formula."""
+        """Calculate the support weight using the default policy formula.
 
-        return 1.0 * self.institutions + 0.3 * log(1 + self.records)
+        ``inst_count`` is sourced from :attr:`institutions` and ``src_count`` is
+        sourced from :attr:`count`, mirroring the thresholds in
+        ``docs/policies.md``.
+        """
+
+        return 1.0 * self.institutions + 0.3 * log(1 + self.count)
 
 
 class Candidate(BaseModel):

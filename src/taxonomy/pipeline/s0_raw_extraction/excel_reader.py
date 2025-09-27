@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import random
 from datetime import datetime, timezone
 from typing import Iterable, List
 
@@ -11,6 +10,7 @@ from loguru import logger
 
 from ...config.settings import Settings, get_settings
 from ...entities import Provenance, SourceMeta, SourceRecord
+from ...utils.helpers import stable_shuffle
 
 
 def load_faculty_dataframe(settings: Settings | None = None) -> pl.DataFrame:
@@ -111,24 +111,32 @@ def select_top_institutions(summary: pl.DataFrame, top_n: int, seed: int) -> pl.
         raise ValueError("top_n must be a positive integer")
     trimmed = summary.head(top_n)
     rows = list(trimmed.iter_rows(named=True))
-    random.Random(seed).shuffle(rows)
-    shuffled = pl.DataFrame(rows) if rows else trimmed
+    shuffled_rows = stable_shuffle(rows, seed)
+    shuffled = (
+        pl.DataFrame(shuffled_rows, schema=trimmed.schema)
+        if rows
+        else trimmed
+    )
     logger.debug("Selected top institutions", top_n=top_n)
     return shuffled
 
 
 def _iter_colleges(row: dict, seed: int) -> Iterable[str]:
-    colleges: List[str] = list(row.get("colleges", []))
-    rng = random.Random(seed)
-    rng.shuffle(colleges)
+    colleges: List[str] = stable_shuffle(list(row.get("colleges", [])), seed)
     for college in colleges:
         yield college
 
 
 def generate_source_records(settings: Settings | None = None) -> List[SourceRecord]:
-    """Convert Excel-derived colleges into SourceRecord instances."""
+    """Convert Excel-derived colleges into SourceRecord instances.
+
+    The call to :meth:`settings.paths.ensure_exists` makes the filesystem side
+    effects explicit for callers that expect output or cache directories to be
+    present.
+    """
 
     settings = settings or get_settings()
+    settings.paths.ensure_exists()
     excel_policy = settings.policies.level0_excel
     df = load_faculty_dataframe(settings)
     summary = count_colleges_per_institution(df)
