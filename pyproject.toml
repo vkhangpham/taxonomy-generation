@@ -1,7 +1,30 @@
 [project]
 name = "taxonomy"
 version = "0.1.0"
-description = "Add your description here"
+description = "Academic taxonomy generation system"
 readme = "README.md"
 requires-python = ">=3.11"
-dependencies = []
+dependencies = [
+    "pydantic>=2.0.0",
+    "polars>=0.20.0",
+    "openpyxl>=3.1.0",
+    "dspy-ai>=2.4.0",
+    "openai>=1.0.0",
+    "jellyfish>=0.11.0",
+    "python-Levenshtein>=0.20.0",
+    "firecrawl-py>=0.0.8",
+    "requests>=2.31.0",
+    "langdetect>=1.0.9",
+    "loguru>=0.7.0",
+    "tqdm>=4.66.0",
+    "pyyaml>=6.0",
+    "python-dotenv>=1.0.0",
+    "pydantic-settings>=2.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4.0",
+    "black>=23.0.0",
+    "ruff>=0.1.0",
+]

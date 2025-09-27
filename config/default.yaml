@@ -1,0 +1,82 @@
+environment: development
+random_seed: 20230927
+paths:
+  data_dir: data
+  output_dir: output
+  cache_dir: .cache
+  logs_dir: logs
+  metadata_dir: metadata
+policies:
+  policy_version: "0.1"
+  level_thresholds:
+    level_0:
+      min_institutions: 1
+      min_src_count: 1
+      weight_formula: "1.0*inst_count + 0.3*log(1+src_count)"
+    level_1:
+      min_institutions: 1
+      min_src_count: 1
+      weight_formula: "1.0*inst_count + 0.3*log(1+src_count)"
+    level_2:
+      min_institutions: 2
+      min_src_count: 1
+      weight_formula: "1.0*inst_count + 0.3*log(1+src_count)"
+    level_3:
+      min_institutions: 2
+      min_src_count: 3
+      weight_formula: "1.0*inst_count + 0.3*log(1+src_count)"
+  label_policy:
+    minimal_canonical_form:
+      case: lower
+      remove_punctuation: true
+      fold_diacritics: true
+      collapse_whitespace: true
+      min_length: 2
+      max_length: 64
+      boilerplate_patterns:
+        - "department of"
+        - "school of"
+        - "college of"
+        - "program in"
+    token_minimality_preference: prefer_shortest_unique
+    punctuation_handling: strip_terminal
+  institution_policy:
+    campus_vs_system: prefer-campus
+    joint_center_handling: duplicate-under-both
+    cross_listing_strategy: merge-with-stronger-parent
+    canonical_mappings: {}
+  web:
+    allowed_domains:
+      - ".edu"
+      - ".org"
+    disallowed_paths:
+      - "/events"
+      - "/news"
+      - "/calendar"
+    robots_txt_compliance: true
+    dynamic_content: false
+    pdf_processing_limit: 500
+    ttl_cache_days: 14
+    firecrawl:
+      concurrency: 6
+      max_depth: 3
+      max_pages: 300
+      render_timeout_ms: 10000
+  llm:
+    temperature: 0.0
+    nucleus_top_p: 1.0
+    json_mode: true
+    retry_attempts: 3
+    retry_backoff_seconds: 2.0
+    random_seed: 12345
+    token_budget: 4096
+  deduplication:
+    thresholds:
+      l0_l1: 0.93
+      l2_l3: 0.9
+    merge_policy: conservative
+  level0_excel:
+    excel_file: data/Faculty Extraction Report.xlsx
+    sheets_to_process: []
+    top_n_institutions: 25
+    random_seed: 20230927
