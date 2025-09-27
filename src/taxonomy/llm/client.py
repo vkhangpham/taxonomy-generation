@@ -42,6 +42,7 @@ class LLMClient:
         self._provider_manager = provider_manager
         self._validator = validator
         self._metrics = metrics or MetricsCollector()
+        self._metrics_enabled = settings.observability.metrics_enabled
         self._provider_manager.configure_policy_defaults(
             top_p=self._settings.nucleus_top_p,
             json_mode=self._settings.json_mode,
@@ -90,8 +91,9 @@ class LLMClient:
             except ProviderError as exc:
                 last_error = str(exc)
                 failures += 1
-                self._metrics.incr("provider_error")
-                if not exc.retryable or attempt == total_attempts - 1:
+                self._metric("provider_error")
+                retryable = exc.retryable and attempt < total_attempts - 1
+                if not retryable:
                     return LLMResponse.failure(
                         raw=None,
                         tokens=TokenUsage(),
@@ -100,9 +102,10 @@ class LLMClient:
                         latency_ms=0.0,
                     )
                 if failures >= quarantine_threshold:
-                    self._metrics.incr("quarantined")
+                    self._metric("quarantined")
                     raise QuarantineError(last_error or "LLM response quarantined")
-                if backoff > 0 and attempt < total_attempts - 1:
+                self._metric("retries")
+                if backoff > 0:
                     time.sleep(backoff)
                     backoff *= 2
                 continue
@@ -112,12 +115,12 @@ class LLMClient:
                 prompt_meta.schema_path,
                 enforce_order_by=prompt_meta.enforce_order_by,
             )
-            self._metrics.incr("calls_total")
-            self._metrics.record_tokens(
+            self._metric("calls_total")
+            self._record_tokens(
                 provider_response.usage.prompt_tokens,
                 provider_response.usage.completion_tokens,
             )
-            self._metrics.record_latency(provider_response.performance.latency_ms)
+            self._record_latency(provider_response.performance.latency_ms)
 
             if validation.ok:
                 metadata = self._response_meta(
@@ -125,6 +128,7 @@ class LLMClient:
                     provider=provider_response,
                     repaired=validation.repaired,
                 )
+                self._metric("ok")
                 return LLMResponse.success(
                     content=validation.parsed,
                     raw=provider_response.content,
@@ -135,7 +139,7 @@ class LLMClient:
 
             last_error = validation.error or "Unknown validation error"
             failures += 1
-            self._metrics.incr("invalid_json")
+            self._metric("invalid_json")
 
             first_retry_eligible = not constrained_applied and attempt < total_attempts - 1
             if first_retry_eligible:
@@ -147,17 +151,18 @@ class LLMClient:
                     merged_options = merged_options.model_copy(update={"json_mode": True})
 
             if failures >= quarantine_threshold and not first_retry_eligible:
-                self._metrics.incr("quarantined")
+                self._metric("quarantined")
                 raise QuarantineError(last_error)
 
             if attempt == total_attempts - 1:
                 raise ValidationError(last_error, retryable=False)
 
+            self._metric("retries")
             if backoff > 0 and attempt < total_attempts - 1:
                 time.sleep(backoff)
                 backoff *= 2
 
-        self._metrics.incr("quarantined")
+        self._metric("quarantined")
         raise QuarantineError(last_error or "LLM response quarantined")
 
     def _merge_options(self, options: LLMOptions) -> LLMOptions:
@@ -181,6 +186,18 @@ class LLMClient:
         if rendered_prompt.rstrip().endswith(constraint):
             return rendered_prompt
         return f"{rendered_prompt}\n\n{constraint}"
+
+    def _metric(self, name: str, value: int = 1) -> None:
+        if self._metrics_enabled:
+            self._metrics.incr(name, value)
+
+    def _record_latency(self, value_ms: float) -> None:
+        if self._metrics_enabled:
+            self._metrics.record_latency(value_ms)
+
+    def _record_tokens(self, prompt_tokens: int, completion_tokens: int) -> None:
+        if self._metrics_enabled:
+            self._metrics.record_tokens(prompt_tokens, completion_tokens)
 
     def _response_meta(
         self,

@@ -122,6 +122,10 @@ def test_llm_client_validates_and_sorts(client: LLMClient) -> None:
     )
     assert response.ok is True
     assert [item["normalized"] for item in response.content] == ["accounting", "b lab"]
+    snapshot = client._metrics.snapshot()
+    assert snapshot.counters.get("calls_total") == 1
+    assert snapshot.counters.get("ok") == 1
+    assert snapshot.counters.get("retries", 0) == 0
 
 
 def test_llm_client_repairs_partial_json(client: LLMClient) -> None:
@@ -142,3 +146,44 @@ def test_llm_client_repairs_partial_json(client: LLMClient) -> None:
     )
     assert response.ok is True
     assert response.meta["repaired"] is True
+
+
+def test_llm_client_records_retry_metrics(client: LLMClient) -> None:
+    attempts = {"count": 0}
+
+    def _call(_prompt: str, _request):
+        attempts["count"] += 1
+        if attempts["count"] == 1:
+            return ProviderResponse(
+                content="not json",
+                usage=TokenUsage(prompt_tokens=6, completion_tokens=3),
+                performance=PerformanceMetrics(),
+            )
+        payload = json.dumps(
+            [
+                {"label": "Accounting", "normalized": "accounting", "aliases": []},
+            ]
+        )
+        return ProviderResponse(
+            content=payload,
+            usage=TokenUsage(prompt_tokens=8, completion_tokens=4),
+            performance=PerformanceMetrics(),
+        )
+
+    client._provider_manager.profile().call = _call
+
+    response = client.run(
+        "taxonomy.extract",
+        {
+            "institution": "Retry University",
+            "level": 1,
+            "source_text": "Accounting",
+        },
+    )
+
+    assert response.ok is True
+    snapshot = client._metrics.snapshot()
+    assert snapshot.counters.get("retries") == 1
+    assert snapshot.counters.get("calls_total") == 2
+    assert snapshot.counters.get("ok") == 1
+    assert snapshot.counters.get("invalid_json") == 1
