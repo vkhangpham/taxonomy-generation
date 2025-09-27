@@ -39,8 +39,11 @@ class MetricsCollector:
     def record_cache_miss(self) -> None:
         self.increment("cache_misses")
 
-    def record_cache_miss(self) -> None:
-        self.increment("cache_misses")
+    def record_deduped(self) -> None:
+        self.increment("deduped")
+
+    def record_pdf_extracted(self) -> None:
+        self.increment("pdf_extracted")
 
     def record_error(self, error_type: str) -> None:
         key = f"error::{error_type}"

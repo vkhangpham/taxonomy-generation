@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import gzip
 import os
 import re
 import time
@@ -12,6 +13,7 @@ from typing import Iterable, List, Optional, Sequence
 import requests
 from requests import Response
 from requests.exceptions import RequestException
+from xml.etree import ElementTree as ET
 
 try:  # pragma: no cover - optional dependency
     from firecrawl.v2 import FirecrawlClient
@@ -34,9 +36,10 @@ from .utils import RateLimiter, canonicalize_url, retryable, should_follow, with
 class FetchError(Exception):
     """Exception raised when a network fetch fails."""
 
-    def __init__(self, message: str, *, retryable: bool = True) -> None:
+    def __init__(self, message: str, *, retryable: bool = True, error_type: str = "fetch") -> None:
         super().__init__(message)
         self.retryable = retryable
+        self.error_type = error_type
 
 
 def _document_html(document: Document | None) -> bytes:
@@ -112,9 +115,81 @@ class WebMiner:
     def crawl_institution(self, config: CrawlConfig) -> CrawlResult:
         metrics = MetricsCollector(config.institution_id)
         session = CrawlSession(config=config)
-        session.enqueue_seed_urls()
-        result = CrawlResult(institution_id=config.institution_id)
+        ttl_override_seconds = config.ttl_days * 24 * 3600
+
+        include_matchers: list[re.Pattern[str]] = []
+        for pattern in config.include_patterns:
+            try:
+                include_matchers.append(re.compile(pattern))
+            except re.error as exc:
+                self._logger.warning(
+                    "Invalid include pattern",
+                    institution=config.institution_id,
+                    pattern=pattern,
+                    error=str(exc),
+                )
+
+        def matches_include(candidate: str) -> bool:
+            if not include_matchers:
+                return False
+            return any(matcher.search(candidate) for matcher in include_matchers)
+
+        session.enqueue_seed_urls(prioritize=matches_include)
+        queued_urls: set[str] = {entry.url for entry in session.queue.iter_pending()}
         visited: set[str] = set()
+
+        def has_capacity_for_new_url() -> bool:
+            if config.max_pages:
+                return len(session.queue) + session.budget.pages_fetched < config.max_pages
+            return True
+
+        if config.respect_robots and config.max_depth >= 1:
+            processed_sitemaps: set[str] = set()
+            for seed_url in config.seed_urls:
+                try:
+                    robots_info = self.robots_checker.info(seed_url)
+                except Exception as exc:
+                    self._logger.debug(
+                        "Sitemap discovery skipped",
+                        institution=config.institution_id,
+                        url=seed_url,
+                        error=str(exc),
+                    )
+                    continue
+                for sitemap_url in robots_info.sitemaps:
+                    if sitemap_url in processed_sitemaps:
+                        continue
+                    if not has_capacity_for_new_url():
+                        break
+                    remaining_capacity = None
+                    if config.max_pages:
+                        remaining_capacity = config.max_pages - (len(session.queue) + session.budget.pages_fetched)
+                        if remaining_capacity <= 0:
+                            break
+                    discovered_urls = self._collect_sitemap_urls(
+                        sitemap_url,
+                        timeout=config.page_timeout_seconds,
+                        seen=set(),
+                        max_urls=remaining_capacity,
+                    )
+                    for candidate in discovered_urls:
+                        if candidate in queued_urls or candidate in visited:
+                            continue
+                        if not has_capacity_for_new_url():
+                            break
+                        if not should_follow(candidate, config.allowed_domains, config.disallowed_paths):
+                            continue
+                        session.queue.enqueue(
+                            URLQueueEntry(url=candidate, depth=1, discovered_from=sitemap_url),
+                            priority=matches_include(candidate),
+                        )
+                        queued_urls.add(candidate)
+                        metrics.increment("urls_queued")
+                    if not has_capacity_for_new_url():
+                        break
+                    processed_sitemaps.add(sitemap_url)
+
+        result = CrawlResult(institution_id=config.institution_id)
 
         while True:
             if not session.budget.within_limits():
@@ -158,10 +233,10 @@ class WebMiner:
                 metrics.record_error("content_policy")
                 continue
             except FetchError as exc:
-                error = CrawlError(url=url, error_type="fetch", detail=str(exc), retryable=exc.retryable)
+                error = CrawlError(url=url, error_type=exc.error_type, detail=str(exc), retryable=exc.retryable)
                 session.record_error(error)
                 result.add_error(error)
-                metrics.record_error("fetch")
+                metrics.record_error(exc.error_type)
                 continue
             except Exception as exc:  # pragma: no cover - defensive catch
                 error = CrawlError(url=url, error_type="fetch", detail=str(exc), retryable=False)
@@ -186,6 +261,7 @@ class WebMiner:
                     rendered=fetch_response.rendered,
                     robots_blocked=False,
                     redirects=fetch_response.redirects,
+                    metrics=metrics,
                 )
             except ContentPolicyError as exc:
                 error = CrawlError(url=url, error_type="content_policy", detail=str(exc), retryable=False)
@@ -212,7 +288,7 @@ class WebMiner:
                 metrics.record_error("http")
                 continue
 
-            self.cache.store(snapshot)
+            self.cache.store(snapshot, metrics=metrics, ttl_seconds=ttl_override_seconds)
             result.add_snapshot(snapshot)
             session.visited[url] = fetch_response.fetched_at
             session.budget.pages_fetched += 1
@@ -222,11 +298,16 @@ class WebMiner:
                 discovered = self._discover_links(snapshot.html, snapshot.url)
                 followable = [link for link in discovered if should_follow(link, config.allowed_domains, config.disallowed_paths)]
                 for link in followable:
-                    if link not in visited:
-                        session.queue.enqueue(
-                            URLQueueEntry(url=link, depth=queue_entry.depth + 1, discovered_from=snapshot.url)
-                        )
-                        metrics.increment("urls_queued")
+                    if link in visited or link in queued_urls:
+                        continue
+                    if not has_capacity_for_new_url():
+                        break
+                    session.queue.enqueue(
+                        URLQueueEntry(url=link, depth=queue_entry.depth + 1, discovered_from=snapshot.url),
+                        priority=matches_include(link),
+                    )
+                    queued_urls.add(link)
+                    metrics.increment("urls_queued")
 
         result.budget_status = session.budget
         result.merge_metrics(metrics.finalize())
@@ -265,10 +346,13 @@ class WebMiner:
                 except ValueError:
                     declared_length = None
                 else:
-                    if not within_content_budget(declared_length, config.max_content_size_mb):
-                        raise ContentPolicyError(
-                            "content_length",
+                    limit_bytes = config.max_content_size_mb * 1024 * 1024 if config.max_content_size_mb else None
+                    if limit_bytes and declared_length > limit_bytes:
+                        response.close()
+                        raise FetchError(
                             f"Content-Length {declared_length} exceeds limit {config.max_content_size_mb} MB",
+                            retryable=False,
+                            error_type="over_budget",
                         )
             body = response.content
             redirects = [r.url for r in getattr(response, "history", []) if getattr(r, "url", None)]
@@ -332,6 +416,90 @@ class WebMiner:
             fetched_at=fetched_at,
             bytes_downloaded=len(final_body),
         )
+
+    def _fetch_sitemap(self, sitemap_url: str, timeout: float) -> str | None:
+        headers = {"User-Agent": self.user_agent}
+        try:
+            response = requests.get(sitemap_url, headers=headers, timeout=timeout)
+            response.raise_for_status()
+        except RequestException as exc:
+            self._logger.debug("Sitemap fetch failed", sitemap_url=sitemap_url, error=str(exc))
+            return None
+        except Exception as exc:  # pragma: no cover - defensive
+            self._logger.debug("Sitemap fetch error", sitemap_url=sitemap_url, error=str(exc))
+            return None
+
+        try:
+            content = response.content
+            content_type = response.headers.get("content-type", "").lower()
+            if "gzip" in content_type or sitemap_url.endswith(".gz"):
+                try:
+                    content = gzip.decompress(content)
+                except OSError as exc:
+                    self._logger.debug("Sitemap decompress failed", sitemap_url=sitemap_url, error=str(exc))
+                    return None
+            try:
+                return content.decode("utf-8")
+            except UnicodeDecodeError:
+                return content.decode("utf-8", errors="ignore")
+        finally:
+            response.close()
+
+    def _collect_sitemap_urls(
+        self,
+        sitemap_url: str,
+        *,
+        timeout: float,
+        seen: set[str],
+        depth: int = 0,
+        max_depth: int = 2,
+        max_urls: int | None = None,
+    ) -> List[str]:
+        if sitemap_url in seen or depth > max_depth:
+            return []
+        seen.add(sitemap_url)
+
+        body = self._fetch_sitemap(sitemap_url, timeout)
+        if body is None:
+            return []
+
+        try:
+            root = ET.fromstring(body)
+        except ET.ParseError as exc:
+            self._logger.debug("Sitemap parse failed", sitemap_url=sitemap_url, error=str(exc))
+            return []
+
+        urls: List[str] = []
+        tag = root.tag.lower()
+        if tag.endswith("sitemapindex") and depth < max_depth:
+            for loc in root.findall(".//{*}loc"):
+                nested = (loc.text or "").strip()
+                if not nested:
+                    continue
+                remaining = None if max_urls is None else max_urls - len(urls)
+                if remaining is not None and remaining <= 0:
+                    break
+                nested_urls = self._collect_sitemap_urls(
+                    nested,
+                    timeout=timeout,
+                    seen=seen,
+                    depth=depth + 1,
+                    max_depth=max_depth,
+                    max_urls=remaining,
+                )
+                urls.extend(nested_urls)
+                if max_urls is not None and len(urls) >= max_urls:
+                    return urls[:max_urls]
+        else:
+            for loc in root.findall(".//{*}loc"):
+                candidate = (loc.text or "").strip()
+                if not candidate:
+                    continue
+                urls.append(candidate)
+                if max_urls is not None and len(urls) >= max_urls:
+                    return urls
+
+        return urls
 
     def _discover_links(self, html: str, base_url: str) -> Sequence[str]:
         anchors = re.findall(r"<a[^>]+href=\"([^\"]+)\"", html, flags=re.IGNORECASE)

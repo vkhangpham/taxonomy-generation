@@ -6,7 +6,7 @@ import json
 import threading
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict, Optional, TYPE_CHECKING
 
 from pydantic import ValidationError
 
@@ -14,6 +14,9 @@ from taxonomy.entities.core import PageSnapshot
 from taxonomy.utils.logging import get_logger
 
 from .models import CacheEntry
+
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    from .observability import MetricsCollector
 
 
 class CacheManager:
@@ -98,16 +101,28 @@ class CacheManager:
             snapshot.meta.alias_urls = sorted(set(entry.alias_urls))
             return snapshot
 
-    def store(self, snapshot: PageSnapshot) -> None:
+    def store(
+        self,
+        snapshot: PageSnapshot,
+        *,
+        metrics: "MetricsCollector" | None = None,
+        ttl_seconds: int | None = None,
+    ) -> None:
         with self._lock:
             entry = self._checksum_index.get(snapshot.checksum)
             now = datetime.now(timezone.utc)
+            ttl_to_use = ttl_seconds if ttl_seconds is not None else self.ttl_seconds
             if entry:
                 if snapshot.url not in entry.alias_urls:
                     entry.alias_urls.append(snapshot.url)
                     entry.alias_urls = sorted(set(entry.alias_urls))
                     self._stats["deduped"] += 1
+                    if metrics is not None:
+                        metrics.record_deduped()
                 self._index[snapshot.url] = entry
+                entry.stored_at = now
+                if ttl_seconds is not None:
+                    entry.ttl_seconds = ttl_to_use
             else:
                 html_bytes = len(snapshot.html.encode("utf-8")) if snapshot.html else 0
                 entry = CacheEntry(
@@ -115,7 +130,7 @@ class CacheManager:
                     alias_urls=[snapshot.url],
                     checksum=snapshot.checksum,
                     stored_at=now,
-                    ttl_seconds=self.ttl_seconds,
+                    ttl_seconds=ttl_to_use,
                     size_bytes=len(snapshot.text.encode("utf-8")) + html_bytes,
                 )
                 self._index[snapshot.url] = entry

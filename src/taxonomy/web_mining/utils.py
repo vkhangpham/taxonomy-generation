@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Callable, Sequence, TypeVar
 from urllib.parse import urljoin, urlparse, urlunparse
@@ -13,6 +13,10 @@ from taxonomy.entities.core import PageSnapshot
 
 
 T = TypeVar("T")
+
+
+def _monotonic() -> float:
+    return time.monotonic()
 
 
 def normalize_url(url: str) -> str:
@@ -94,34 +98,64 @@ class RateLimiter:
     rate_per_second: float
     burst: int
 
-    _tokens: float = 0.0
-    _last_check: float = time.monotonic()
+    _tokens: float = field(default=0.0, init=False)
+    _last_check: float = field(default_factory=_monotonic, init=False)
+
+    def __post_init__(self) -> None:
+        # Seed the bucket to allow an initial burst up to the configured size.
+        self._tokens = float(self.burst)
+        self._last_check = time.monotonic()
+
+    def _refill(self, now: float) -> None:
+        elapsed = max(0.0, now - self._last_check)
+        if elapsed == 0:
+            return
+        if self.rate_per_second > 0:
+            self._tokens = min(self.burst, self._tokens + elapsed * self.rate_per_second)
+        self._last_check = now
+
+    def _consume_token(self) -> None:
+        self._tokens = max(0.0, self._tokens - 1)
 
     def acquire(self) -> None:
-        now = time.monotonic()
-        elapsed = now - self._last_check
-        self._last_check = now
-        self._tokens = min(self.burst, self._tokens + elapsed * self.rate_per_second)
-        if self._tokens >= 1:
-            self._tokens -= 1
+        if self.rate_per_second <= 0:
+            self._tokens = float(self.burst)
+            self._consume_token()
+            self._last_check = time.monotonic()
             return
-        sleep_time = (1 - self._tokens) / self.rate_per_second if self.rate_per_second else 0
-        if sleep_time > 0:
-            time.sleep(sleep_time)
-        self._tokens = max(0.0, self._tokens - 1)
+
+        now = time.monotonic()
+        self._refill(now)
+
+        if self._tokens < 1:
+            tokens_needed = 1 - self._tokens
+            sleep_time = tokens_needed / self.rate_per_second
+            if sleep_time > 0:
+                time.sleep(sleep_time)
+            post_sleep = time.monotonic()
+            self._refill(post_sleep)
+
+        self._consume_token()
 
     async def acquire_async(self) -> None:
-        now = time.monotonic()
-        elapsed = now - self._last_check
-        self._last_check = now
-        self._tokens = min(self.burst, self._tokens + elapsed * self.rate_per_second)
-        if self._tokens >= 1:
-            self._tokens -= 1
+        if self.rate_per_second <= 0:
+            self._tokens = float(self.burst)
+            self._consume_token()
+            self._last_check = time.monotonic()
             return
-        sleep_time = (1 - self._tokens) / self.rate_per_second if self.rate_per_second else 0
-        if sleep_time > 0:
-            await asyncio.sleep(sleep_time)
-        self._tokens = max(0.0, self._tokens - 1)
+
+        now = time.monotonic()
+        self._refill(now)
+
+        if self._tokens < 1:
+            tokens_needed = 1 - self._tokens
+            sleep_time = tokens_needed / self.rate_per_second
+            if sleep_time > 0:
+                await asyncio.sleep(sleep_time)
+            post_sleep = time.monotonic()
+            self._refill(post_sleep)
+
+        self._consume_token()
 
 
 def exponential_backoff(attempt: int, base_delay: float = 1.0, max_delay: float = 30.0) -> float:

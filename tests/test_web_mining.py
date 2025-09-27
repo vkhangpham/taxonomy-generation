@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -9,11 +10,31 @@ import pytest
 
 from taxonomy.entities.core import PageSnapshot, PageSnapshotMeta
 from taxonomy.web_mining.cache import CacheManager
-from taxonomy.web_mining.client import FetchResponse, WebMiner
+from taxonomy.web_mining.client import FetchError, FetchResponse, WebMiner
 from taxonomy.web_mining.content import ContentPolicyError, ContentProcessor, LanguageDetectionResult
-from taxonomy.web_mining.models import CrawlConfig
+from taxonomy.web_mining.observability import MetricsCollector
+from taxonomy.web_mining.models import CrawlConfig, RobotsInfo
 from taxonomy.web_mining.robots import RobotsChecker
-from taxonomy.web_mining.utils import is_allowed_domain
+from taxonomy.web_mining.utils import RateLimiter, is_allowed_domain
+
+
+class _FakeClock:
+    def __init__(self) -> None:
+        self.now = 0.0
+        self.sleeps: list[float] = []
+
+    def monotonic(self) -> float:
+        return self.now
+
+    def sleep(self, seconds: float) -> None:
+        self.sleeps.append(seconds)
+        self.now += seconds
+
+    async def sleep_async(self, seconds: float) -> None:
+        self.sleep(seconds)
+
+    def advance(self, seconds: float) -> None:
+        self.now += seconds
 
 
 @pytest.fixture
@@ -54,6 +75,331 @@ def _snapshot(url: str, text: str) -> PageSnapshot:
     )
 
 
+def test_rate_limiter_respects_rate_over_time(monkeypatch: pytest.MonkeyPatch) -> None:
+    from taxonomy.web_mining import utils as utils_module
+
+    clock = _FakeClock()
+    monkeypatch.setattr(utils_module.time, "monotonic", clock.monotonic)
+    monkeypatch.setattr(utils_module.time, "sleep", clock.sleep)
+
+    limiter = RateLimiter(rate_per_second=2, burst=1)
+
+    limiter.acquire()
+    assert clock.sleeps == []
+
+    limiter.acquire()
+    assert clock.sleeps == [pytest.approx(0.5, rel=1e-3)]
+    assert limiter._last_check == pytest.approx(clock.now, rel=1e-6)
+
+    clock.advance(0.5)
+    limiter.acquire()
+    assert len(clock.sleeps) == 1
+
+
+def test_rate_limiter_async_respects_rate(monkeypatch: pytest.MonkeyPatch) -> None:
+    from taxonomy.web_mining import utils as utils_module
+
+    clock = _FakeClock()
+    monkeypatch.setattr(utils_module.time, "monotonic", clock.monotonic)
+    monkeypatch.setattr(utils_module.asyncio, "sleep", clock.sleep_async)
+
+    limiter = RateLimiter(rate_per_second=1, burst=1)
+
+    async def run() -> None:
+        await limiter.acquire_async()
+        assert clock.sleeps == []
+
+        await limiter.acquire_async()
+        assert clock.sleeps == [pytest.approx(1.0, rel=1e-3)]
+        assert limiter._last_check == pytest.approx(clock.now, rel=1e-6)
+
+        clock.advance(1.0)
+        await limiter.acquire_async()
+        assert len(clock.sleeps) == 1
+
+    asyncio.run(run())
+
+
+def test_fetch_url_respects_content_length_budget(
+    cache: CacheManager,
+    content_processor: ContentProcessor,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from taxonomy.web_mining import client as client_module
+
+    class StubRobotsChecker:
+        def is_allowed(self, url: str) -> bool:
+            return True
+
+        def crawl_delay(self, url: str) -> float | None:
+            return None
+
+        def info(self, url: str) -> RobotsInfo:  # pragma: no cover - unused
+            return RobotsInfo(robots_url="https://example.edu/robots.txt")
+
+    miner = WebMiner(
+        cache=cache,
+        content_processor=content_processor,
+        robots_checker=StubRobotsChecker(),
+        user_agent="TestBot/1.0",
+        max_concurrency=1,
+        rate_limit_per_sec=100.0,
+    )
+
+    class StubResponse:
+        def __init__(self) -> None:
+            self.headers = {
+                "content-type": "text/html",
+                "content-length": str(2 * 1024 * 1024),
+            }
+            self.status_code = 200
+            self.url = "https://example.edu/oversized"
+            self.history: list[str] = []
+            self.closed = False
+
+        @property
+        def content(self) -> bytes:
+            raise AssertionError("Body should not be downloaded when over budget")
+
+        def close(self) -> None:
+            self.closed = True
+
+    monkeypatch.setattr(miner.rate_limiter, "acquire", lambda: None)
+    monkeypatch.setattr(client_module, "retryable", lambda operation, retries=3: StubResponse())
+
+    config = CrawlConfig(
+        institution_id="demo",
+        seed_urls=[],
+        allowed_domains=["example.edu"],
+        disallowed_paths=[],
+        include_patterns=[],
+        max_pages=1,
+        max_depth=1,
+        ttl_days=1,
+        respect_robots=False,
+        respect_crawl_delay=False,
+        page_timeout_seconds=5,
+        render_timeout_seconds=5,
+        crawl_time_budget_minutes=5,
+        max_content_size_mb=1,
+        retry_attempts=0,
+    )
+
+    with pytest.raises(FetchError) as excinfo:
+        miner._fetch_url("https://example.edu/oversized", config)
+
+    assert excinfo.value.error_type == "over_budget"
+    assert excinfo.value.retryable is False
+
+
+def test_crawl_institution_prioritizes_include_patterns(
+    cache: CacheManager,
+    content_processor: ContentProcessor,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seed_url = "https://example.edu/start"
+    include_url = "https://example.edu/important"
+    other_url = "https://example.edu/other"
+
+    class StubRobotsChecker:
+        def is_allowed(self, url: str) -> bool:
+            return True
+
+        def crawl_delay(self, url: str) -> float | None:
+            return None
+
+        def info(self, url: str) -> RobotsInfo:
+            return RobotsInfo(robots_url="https://example.edu/robots.txt", crawl_delay=None, sitemaps=[])
+
+    miner = WebMiner(
+        cache=cache,
+        content_processor=content_processor,
+        robots_checker=StubRobotsChecker(),
+        user_agent="TestBot/1.0",
+        max_concurrency=1,
+        rate_limit_per_sec=100.0,
+    )
+
+    html = (
+        f'<html><body><a href="{include_url}">Include</a>'
+        f'<a href="{other_url}">Other</a></body></html>'
+    )
+    fetch_map = {
+        seed_url: FetchResponse(
+            url=seed_url,
+            status_code=200,
+            content_type="text/html",
+            body=html.encode("utf-8"),
+            rendered=False,
+            redirects=[],
+            fetched_at=datetime.now(timezone.utc),
+            bytes_downloaded=len(html),
+        ),
+        include_url: FetchResponse(
+            url=include_url,
+            status_code=200,
+            content_type="text/html",
+            body=b"<html><body>This page is in English.</body></html>",
+            rendered=False,
+            redirects=[],
+            fetched_at=datetime.now(timezone.utc),
+            bytes_downloaded=28,
+        ),
+        other_url: FetchResponse(
+            url=other_url,
+            status_code=200,
+            content_type="text/html",
+            body=b"<html><body>This page is also in English.</body></html>",
+            rendered=False,
+            redirects=[],
+            fetched_at=datetime.now(timezone.utc),
+            bytes_downloaded=28,
+        ),
+    }
+
+    fetched_order: list[str] = []
+
+    def fake_fetch(url: str, crawl_config: CrawlConfig) -> FetchResponse:
+        fetched_order.append(url)
+        return fetch_map[url]
+
+    monkeypatch.setattr(miner, "_fetch_url", fake_fetch)
+    monkeypatch.setattr(miner.rate_limiter, "acquire", lambda: None)
+
+    config = CrawlConfig(
+        institution_id="demo",
+        seed_urls=[seed_url],
+        allowed_domains=["example.edu"],
+        disallowed_paths=[],
+        include_patterns=[r"important"],
+        max_pages=3,
+        max_depth=2,
+        ttl_days=1,
+        respect_robots=True,
+        respect_crawl_delay=False,
+        page_timeout_seconds=5,
+        render_timeout_seconds=5,
+        crawl_time_budget_minutes=5,
+        max_content_size_mb=5,
+        retry_attempts=1,
+    )
+
+    result = miner.crawl_institution(config)
+
+    assert fetched_order[:2] == [seed_url, include_url]
+    assert any(snapshot.url == include_url for snapshot in result.snapshots)
+
+
+def test_crawl_institution_seeds_from_sitemap_respecting_budget(
+    cache: CacheManager,
+    content_processor: ContentProcessor,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seed_url = "https://example.edu/start"
+    sitemap_url = "https://example.edu/sitemap.xml"
+    first_url = "https://example.edu/about"
+    second_url = "https://example.edu/contact"
+
+    class StubRobotsChecker:
+        def is_allowed(self, url: str) -> bool:
+            return True
+
+        def crawl_delay(self, url: str) -> float | None:
+            return None
+
+        def info(self, url: str) -> RobotsInfo:
+            return RobotsInfo(
+                robots_url="https://example.edu/robots.txt",
+                crawl_delay=None,
+                sitemaps=[sitemap_url],
+            )
+
+    miner = WebMiner(
+        cache=cache,
+        content_processor=content_processor,
+        robots_checker=StubRobotsChecker(),
+        user_agent="TestBot/1.0",
+        max_concurrency=1,
+        rate_limit_per_sec=100.0,
+    )
+
+    sitemap_body = (
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+        "<urlset xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\">"
+        f"<url><loc>{first_url}</loc></url>"
+        f"<url><loc>{second_url}</loc></url>"
+        "</urlset>"
+    )
+
+    def fake_fetch_sitemap(url: str, timeout: float) -> str | None:
+        assert url == sitemap_url
+        return sitemap_body
+
+    monkeypatch.setattr(miner, "_fetch_sitemap", fake_fetch_sitemap)
+    monkeypatch.setattr(miner.rate_limiter, "acquire", lambda: None)
+
+    fetch_map = {
+        seed_url: FetchResponse(
+            url=seed_url,
+            status_code=200,
+            content_type="text/html",
+            body=b"<html><body>seed</body></html>",
+            rendered=False,
+            redirects=[],
+            fetched_at=datetime.now(timezone.utc),
+            bytes_downloaded=30,
+        ),
+        first_url: FetchResponse(
+            url=first_url,
+            status_code=200,
+            content_type="text/html",
+            body=b"<html><body>About page with English content.</body></html>",
+            rendered=False,
+            redirects=[],
+            fetched_at=datetime.now(timezone.utc),
+            bytes_downloaded=31,
+        ),
+        second_url: FetchResponse(
+            url=second_url,
+            status_code=200,
+            content_type="text/html",
+            body=b"<html><body>Contact page with English contact info.</body></html>",
+            rendered=False,
+            redirects=[],
+            fetched_at=datetime.now(timezone.utc),
+            bytes_downloaded=33,
+        ),
+    }
+
+    fetched_order: list[str] = []
+
+    def fake_fetch(url: str, crawl_config: CrawlConfig) -> FetchResponse:
+        fetched_order.append(url)
+        return fetch_map[url]
+
+    monkeypatch.setattr(miner, "_fetch_url", fake_fetch)
+
+    config = CrawlConfig(
+        institution_id="demo",
+        seed_urls=[seed_url],
+        allowed_domains=["example.edu"],
+        disallowed_paths=[],
+        include_patterns=[],
+        max_pages=2,
+        max_depth=2,
+        ttl_days=1,
+        respect_robots=True,
+        respect_crawl_delay=False,
+        page_timeout_seconds=5,
+        render_timeout_seconds=5,
+        crawl_time_budget_minutes=5,
+        max_content_size_mb=5,
+        retry_attempts=1,
+    )
+
+    miner.crawl_institution(config)
+
+    assert fetched_order == [seed_url, first_url]
 def test_cache_manager_roundtrip(cache: CacheManager) -> None:
     snapshot = _snapshot("https://example.edu/page", "Hello world")
     cache.store(snapshot)
@@ -79,10 +425,28 @@ def test_cache_manager_alias_urls(cache: CacheManager) -> None:
     assert restored_second.meta.alias_urls == expected_aliases
 
 
+def test_cache_manager_records_dedup_metric(cache: CacheManager) -> None:
+    metrics = MetricsCollector("demo")
+    first = _snapshot("https://example.edu/page", "Hello world")
+    duplicate = _snapshot("https://example.edu/page?ref=dup", "Hello world")
+    cache.store(first, metrics=metrics)
+    cache.store(duplicate, metrics=metrics)
+
+    summary = metrics.finalize()
+    assert summary.get("deduped") == 1
+
+
 def test_cache_manager_expiration(tmp_path: Path) -> None:
     cache = CacheManager(tmp_path / "cache", ttl_days=0)
     cache.store(_snapshot("https://example.edu/p", "data"))
     assert cache.get("https://example.edu/p") is None
+
+
+def test_cache_manager_ttl_override(tmp_path: Path) -> None:
+    cache = CacheManager(tmp_path / "cache", ttl_days=5)
+    snapshot = _snapshot("https://example.edu/ttl", "Cached")
+    cache.store(snapshot, ttl_seconds=0)
+    assert cache.get(snapshot.url) is None
 
 
 def test_content_processor_extracts_text(content_processor: ContentProcessor) -> None:
@@ -156,6 +520,30 @@ def test_content_processor_pdf_size_limit() -> None:
             body=payload,
         )
     assert excinfo.value.reason == "pdf_size_limit"
+
+
+def test_content_processor_records_pdf_metric(monkeypatch: pytest.MonkeyPatch) -> None:
+    processor = ContentProcessor(
+        language_allowlist=[],
+        min_text_length=0,
+        pdf_extraction_enabled=True,
+        pdf_size_limit_mb=1,
+    )
+    metrics = MetricsCollector("demo")
+
+    monkeypatch.setattr(processor, "_extract_text_from_pdf", lambda payload: "pdf text")
+
+    processor.process(
+        institution="demo",
+        url="https://example.edu/doc",
+        http_status=200,
+        content_type="application/pdf",
+        body=b"%PDF-1.4\n",
+        metrics=metrics,
+    )
+
+    summary = metrics.finalize()
+    assert summary.get("pdf_extracted") == 1
 
 
 def test_robots_checker_allows_and_blocks(robots_checker: RobotsChecker) -> None:

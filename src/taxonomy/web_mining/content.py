@@ -6,7 +6,7 @@ import io
 import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Iterable, List, Tuple
+from typing import Iterable, List, Tuple, TYPE_CHECKING
 
 try:  # pragma: no cover - optional dependency
     from bs4 import BeautifulSoup
@@ -31,6 +31,9 @@ from taxonomy.utils.logging import get_logger
 
 from .models import ContentMetadata, QualityMetrics
 from .utils import canonicalize_url, clean_text, generate_checksum, normalize_url
+
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    from .observability import MetricsCollector
 
 
 class ContentPolicyError(Exception):
@@ -135,6 +138,7 @@ class ContentProcessor:
         robots_blocked: bool = False,
         redirects: List[str] | None = None,
         source: str = "crawl",
+        metrics: "MetricsCollector" | None = None,
     ) -> tuple[PageSnapshot, ContentMetadata]:
         fetched_at = fetched_at or datetime.now(timezone.utc)
         redirects = redirects or []
@@ -165,6 +169,8 @@ class ContentProcessor:
                     f"PDF payload {len(payload_bytes)} bytes exceeds limit of {self.pdf_size_limit_mb} MB",
                 )
             text = self._extract_text_from_pdf(payload if isinstance(payload, bytes) else payload.encode("utf-8"))
+            if metrics is not None and self.pdf_extraction_enabled:
+                metrics.record_pdf_extracted()
         elif html is not None:
             text, canonical_url = self._extract_text_from_html(html, base_url=url)
         else:

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections import deque
 from datetime import datetime, timedelta, timezone
-from typing import Deque, Dict, Iterable, List, Optional, Sequence
+from typing import Callable, Deque, Dict, Iterable, List, Optional, Sequence
 
 from pydantic import BaseModel, Field, PrivateAttr, field_validator, model_validator
 
@@ -114,12 +114,15 @@ class URLQueue(BaseModel):
 
     _queue: Deque[URLQueueEntry] = PrivateAttr(default_factory=deque)
 
-    def enqueue(self, entry: URLQueueEntry) -> None:
-        self._queue.append(entry)
+    def enqueue(self, entry: URLQueueEntry, *, priority: bool = False) -> None:
+        if priority:
+            self._queue.appendleft(entry)
+        else:
+            self._queue.append(entry)
 
-    def extend(self, entries: Iterable[URLQueueEntry]) -> None:
+    def extend(self, entries: Iterable[URLQueueEntry], *, priority: bool = False) -> None:
         for entry in entries:
-            self.enqueue(entry)
+            self.enqueue(entry, priority=priority)
 
     def dequeue(self) -> URLQueueEntry | None:
         if not self._queue:
@@ -183,9 +186,11 @@ class CrawlSession(BaseModel):
         self.budget.max_content_size_mb = self.config.max_content_size_mb
         return self
 
-    def enqueue_seed_urls(self) -> None:
+    def enqueue_seed_urls(self, *, prioritize: Callable[[str], bool] | None = None) -> None:
         for url in self.config.seed_urls:
-            self.queue.enqueue(URLQueueEntry(url=url, depth=0, discovered_from=None))
+            entry = URLQueueEntry(url=url, depth=0, discovered_from=None)
+            is_priority = prioritize(url) if prioritize else False
+            self.queue.enqueue(entry, priority=is_priority)
 
     def record_error(self, error: CrawlError) -> None:
         self.errors.append(error)

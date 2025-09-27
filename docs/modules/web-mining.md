@@ -27,8 +27,8 @@ Rules & Invariants
 
 Core Logic
 - Discovery
-  - Initialize queue from seed_urls and/or sitemap.xml if available.
-  - BFS by default with depth limit; prioritize URLs matching include patterns (e.g., "/departments", "/research").
+  - Initialize the crawl queue from `seed_urls`; augment with robots-advertised sitemaps (depth=1) when available and within configured budgets.
+  - BFS by default with depth limit; URLs matching `include_patterns` are enqueued ahead of others to bias traversal toward high-value sections (e.g., "/departments", "/research").
   - Skip disallowed_paths and external domains unless explicitly whitelisted.
 - Content Processing
   - Extract main text (readability heuristics) while keeping simple list structure markers and resolving canonical URLs relative to the page base.
@@ -36,7 +36,7 @@ Core Logic
   - Enforce minimum text length and PDF size limits; skip pages with insufficient content via `content_policy` errors.
   - Compute checksum over normalized text; store small excerpt for debugging.
 - Dedup & Caching
-  - Before fetch: consult cache by URL and TTL; short-circuit if fresh.
+  - Before fetch: consult cache by URL and TTL; each crawl threads `CrawlConfig.ttl_days` through the cache so entries respect per-run expiry, short-circuiting when snapshots are still fresh.
   - After fetch: check checksum-based dedup to avoid downstream duplication.
 
 Failure Handling
@@ -46,7 +46,7 @@ Failure Handling
 - Content policy violations (language, min text, PDF size) → raise `content_policy` crawl errors and continue without snapshot.
 
 Observability
-- Counters: urls_queued, urls_fetched, robots_blocked, errors, rendered, deduped, pdf_extracted.
+- Counters: urls_queued, urls_fetched, robots_blocked, errors, rendered; `deduped` increments when cache merges duplicate URLs and `pdf_extracted` tracks successful PDF processing.
 - Per-institution budgets: pages_used, depth_max_seen, time_spent.
 - Sampling: store N example snapshots per institution for spot checks.
 

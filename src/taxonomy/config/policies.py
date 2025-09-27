@@ -211,9 +211,15 @@ class LLMDeterminismSettings(BaseModel):
     @model_validator(mode="after")
     def _ensure_profile(self) -> "LLMDeterminismSettings":
         if self.default_profile and self.default_profile not in self.profiles:
-            raise ValueError(
-                f"LLM default_profile '{self.default_profile}' is missing from profiles configuration"
-            )
+            if not self.profiles:
+                self.profiles[self.default_profile] = ProviderProfileSettings(
+                    provider="openai",
+                    model="gpt-4o-mini",
+                )
+            else:
+                raise ValueError(
+                    f"LLM default_profile '{self.default_profile}' is missing from profiles configuration"
+                )
         return self
 
 
