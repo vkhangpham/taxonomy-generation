@@ -65,18 +65,19 @@ def extract_from_snapshots(
     ensure_directory(output_path.parent if output_path.suffix else output_path)
 
     if output_path.suffix:
-        records_location = writer.write_jsonl(record_stream(), output_path, compress=compress)
+        record_paths = [
+            writer.write_jsonl(record_stream(), output_path, compress=compress)
+        ]
     else:
-        records_location = writer.write_batch(record_stream(), output_path, batch_size=batch_size)
+        record_paths = writer.write_batch(record_stream(), output_path, batch_size=batch_size)
 
     if not produced_records:
         logger.warning("No SourceRecords generated", output=str(output_path))
 
-    stats_path = output_path if isinstance(records_location, Path) else Path(output_path)
-    if isinstance(records_location, list):
-        stats_target = stats_path / "extraction.stats.json"
+    if output_path.suffix:
+        stats_target = record_paths[0].with_suffix(record_paths[0].suffix + ".stats.json")
     else:
-        stats_target = stats_path.with_suffix(stats_path.suffix + ".stats.json")
+        stats_target = Path(output_path) / "extraction.stats.json"
 
     metadata = {
         "processor": processor.metrics.as_dict(),
@@ -86,13 +87,13 @@ def extract_from_snapshots(
     writer.write_metadata(metadata, stats_target)
 
     result = {
-        "records": records_location,
+        "records": record_paths,
         "metadata": stats_target,
         "metrics": metadata,
     }
     logger.info(
         "Completed raw extraction",
-        records=str(records_location),
+        records=[str(path) for path in record_paths],
         meta=str(stats_target),
         pages=processor.metrics.pages_seen,
         emitted=processor.metrics.pages_emitted,

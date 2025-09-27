@@ -11,6 +11,7 @@ from typing import Any, Dict, Iterable, List, Protocol, Sequence, runtime_checka
 from ...config.policies import RawExtractionPolicy
 from ...entities.core import PageSnapshot, Provenance, SourceMeta, SourceRecord
 from ...utils import ensure_directory, find_duplicates, get_logger
+from ...utils.logging import set_verbose_text_logging
 from .segmenter import ContentSegmenter, SegmentedBlock, SegmentationResult
 
 
@@ -67,6 +68,7 @@ class RawExtractionProcessor:
         self.metrics = ProcessingMetrics()
         self._logger = get_logger(module=__name__)
         self._quarantine_path = Path(quarantine_path) if quarantine_path else None
+        set_verbose_text_logging(policy.verbose_text_logging)
 
     def process(self, entry: PageSnapshot | SnapshotEnvelope) -> List[SourceRecord]:
         """Process a single snapshot or envelope into SourceRecords."""
@@ -119,8 +121,12 @@ class RawExtractionProcessor:
     def _unwrap(self, entry: PageSnapshot | SnapshotEnvelope) -> tuple[PageSnapshot, Dict[str, Any]]:
         if isinstance(entry, PageSnapshot):
             return entry, {}
-        if isinstance(entry, SnapshotEnvelope):
-            return entry.snapshot, dict(getattr(entry, "metadata", {}))
+        if hasattr(entry, "snapshot"):
+            snapshot = getattr(entry, "snapshot")
+            if isinstance(snapshot, PageSnapshot):
+                metadata_raw = getattr(entry, "metadata", {})
+                metadata = dict(metadata_raw or {})
+                return snapshot, metadata
         raise TypeError(f"Unsupported snapshot entry type: {type(entry)!r}")
 
     def _language_allowed(self, snapshot: PageSnapshot, metadata: Dict[str, Any]) -> bool:

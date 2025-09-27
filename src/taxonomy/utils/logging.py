@@ -47,6 +47,22 @@ def configure_logging(settings: Settings | None = None, level: str = "INFO") -> 
     logger.configure(extra={"run_id": "-", "step": "-"})
 
 
+_VERBOSE_TEXT_LOGGING = False
+
+
+def set_verbose_text_logging(enabled: bool) -> None:
+    """Control whether text payloads are included in debug logs."""
+
+    global _VERBOSE_TEXT_LOGGING
+    _VERBOSE_TEXT_LOGGING = bool(enabled)
+
+
+def verbose_text_logging_enabled() -> bool:
+    """Return True when verbose text debug logging is enabled."""
+
+    return _VERBOSE_TEXT_LOGGING
+
+
 def get_logger(**context: Any):
     """Return a contextualised logger instance."""
 
@@ -73,4 +89,11 @@ def log_timing(step: str, *, logger_=logger):
         logger_.info("Step timing", step=step, seconds=elapsed)
 
 
-__all__ = ["configure_logging", "get_logger", "logging_context", "log_timing"]
+__all__ = [
+    "configure_logging",
+    "get_logger",
+    "logging_context",
+    "log_timing",
+    "set_verbose_text_logging",
+    "verbose_text_logging_enabled",
+]

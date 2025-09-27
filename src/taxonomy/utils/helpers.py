@@ -9,18 +9,31 @@ import unicodedata
 from pathlib import Path
 from typing import Iterable, List, Sequence, TypeVar
 
-from loguru import logger
+from .logging import get_logger, verbose_text_logging_enabled
 
 T = TypeVar("T")
 _WORD_BOUNDARY_PATTERN = re.compile(r"\s+")
 _PUNCTUATION_PATTERN = re.compile(r"[\u2018\u2019\u201C\u201D\-\u2010\u2011\u2012\u2013\u2014\u2015\.,;:/\\]+")
+
+_LOGGER = get_logger(module=__name__)
 
 
 def normalize_whitespace(text: str) -> str:
     """Collapse repeated whitespace into single spaces."""
 
     collapsed = _WORD_BOUNDARY_PATTERN.sub(" ", text.strip())
-    logger.debug("Normalized whitespace", original=text, normalized=collapsed)
+    if verbose_text_logging_enabled():
+        _LOGGER.debug(
+            "Normalized whitespace",
+            original=text[:120],
+            normalized=collapsed[:120],
+        )
+    else:
+        _LOGGER.debug(
+            "Normalized whitespace",
+            original_length=len(text),
+            normalized_length=len(collapsed),
+        )
     return collapsed
 
 
@@ -56,7 +69,7 @@ def serialize_json(data: object, destination: Path | str, *, indent: int = 2) ->
         json.dumps(data, indent=indent, sort_keys=True, ensure_ascii=False) + "\n",
         encoding="utf-8",
     )
-    logger.debug("Serialized JSON", path=str(dest_path), size=dest_path.stat().st_size)
+    _LOGGER.debug("Serialized JSON", path=str(dest_path), size=dest_path.stat().st_size)
     return dest_path
 
 

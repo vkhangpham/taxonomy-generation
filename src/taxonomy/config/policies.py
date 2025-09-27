@@ -256,6 +256,10 @@ class RawExtractionPolicy(BaseModel):
     similarity_threshold: float = Field(default=0.95, ge=0.0, le=1.0)
     similarity_method: str = Field(default="jaccard_shingles", min_length=1)
     remove_boilerplate: bool = Field(default=True)
+    verbose_text_logging: bool = Field(
+        default=False,
+        description="Emit truncated text payloads in debug logs when True.",
+    )
     boilerplate_patterns: List[str] = Field(
         default_factory=lambda: [
             "© \\d{4}",

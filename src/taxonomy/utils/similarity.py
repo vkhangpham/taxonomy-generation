@@ -8,12 +8,12 @@ import re
 from functools import lru_cache
 from typing import Iterable, List, Sequence, Tuple
 
-from loguru import logger
-
 from .helpers import normalize_whitespace
+from .logging import get_logger, verbose_text_logging_enabled
 
 
 _NON_WORD_RE = re.compile(r"[^\w\s]+", re.UNICODE)
+_LOGGER = get_logger(module=__name__)
 
 
 @lru_cache(maxsize=2048)
@@ -26,7 +26,18 @@ def preprocess_for_similarity(text: str) -> str:
     lowered = normalized.lower()
     stripped = _NON_WORD_RE.sub(" ", lowered)
     collapsed = " ".join(stripped.split())
-    logger.debug("Preprocessed text for similarity", original=text[:200], processed=collapsed[:200])
+    if verbose_text_logging_enabled():
+        _LOGGER.debug(
+            "Preprocessed text for similarity",
+            original=text[:120],
+            processed=collapsed[:120],
+        )
+    else:
+        _LOGGER.debug(
+            "Preprocessed text for similarity",
+            original_length=len(text),
+            processed_length=len(collapsed),
+        )
     return collapsed
 
 
@@ -62,7 +73,7 @@ def jaccard_similarity(text1: str, text2: str, *, n: int = 3) -> float:
     if union == 0:
         return 0.0
     score = intersection / union
-    logger.debug(
+    _LOGGER.debug(
         "Computed Jaccard similarity",
         score=score,
         intersection=intersection,
@@ -100,7 +111,7 @@ def minhash_similarity(text1: str, text2: str, *, num_hashes: int = 128, n: int 
     signature_b = _minhash_signature(shingles_b, num_hashes)
     matches = sum(1 for a, b in zip(signature_a, signature_b) if a == b)
     score = matches / num_hashes
-    logger.debug(
+    _LOGGER.debug(
         "Computed MinHash similarity",
         score=score,
         matches=matches,
@@ -148,7 +159,7 @@ def find_duplicates(
         for kept_idx in kept_indices:
             reference = text_blocks[kept_idx]
             score = compute_similarity(candidate_clean, reference or "", method=method, **kwargs)
-            logger.debug(
+            _LOGGER.debug(
                 "Evaluated block similarity",
                 candidate_index=idx,
                 reference_index=kept_idx,
@@ -172,4 +183,3 @@ __all__ = [
     "compute_similarity",
     "find_duplicates",
 ]
-

@@ -2,15 +2,13 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import re
+from dataclasses import dataclass
 from typing import List, Optional
-
-from loguru import logger
 
 from ...config.policies import RawExtractionPolicy
 from ...entities.core import PageSnapshot
-from ...utils import normalize_whitespace
+from ...utils import get_logger, normalize_whitespace
 
 
 @dataclass
@@ -39,6 +37,7 @@ class ContentSegmenter:
 
     def __init__(self, policy: RawExtractionPolicy) -> None:
         self.policy = policy
+        self._logger = get_logger(module=__name__)
         self._header_patterns: List[re.Pattern[str]] = [
             re.compile(pattern, re.IGNORECASE) for pattern in policy.section_header_patterns
         ] if policy.detect_sections else []
@@ -75,7 +74,10 @@ class ContentSegmenter:
                 return
             if self._is_boilerplate(text):
                 boilerplate_removed += 1
-                logger.debug("Removed boilerplate block", text=text[:120])
+                if self.policy.verbose_text_logging:
+                    self._logger.debug("Removed boilerplate block", text=text[:120])
+                else:
+                    self._logger.debug("Removed boilerplate block", length=len(text))
                 current_lines.clear()
                 return
             block = SegmentedBlock(
@@ -122,7 +124,7 @@ class ContentSegmenter:
 
         flush_block()
 
-        logger.debug(
+        self._logger.debug(
             "Segmented snapshot",
             url=snapshot.url,
             institution=snapshot.institution,

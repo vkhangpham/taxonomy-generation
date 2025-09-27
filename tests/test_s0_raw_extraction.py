@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import gzip
 import json
 from datetime import datetime, timezone
 from pathlib import Path
@@ -221,9 +222,12 @@ def test_extract_from_snapshots_end_to_end(tmp_path: Path, segmented_snapshot: S
     output_path = tmp_path / "records.jsonl"
     result = extract_from_snapshots(input_path, output_path)
 
-    records_file = result["records"]
-    assert Path(records_file).exists()
-    contents = Path(records_file).read_text(encoding="utf-8").strip().splitlines()
+    records_files = result["records"]
+    assert isinstance(records_files, list)
+    assert len(records_files) == 1
+    records_file = Path(records_files[0])
+    assert records_file.exists()
+    contents = records_file.read_text(encoding="utf-8").strip().splitlines()
     assert len(contents) == 3
 
     metadata_path = Path(result["metadata"])
@@ -231,6 +235,47 @@ def test_extract_from_snapshots_end_to_end(tmp_path: Path, segmented_snapshot: S
     metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
     assert metadata["processor"]["pages_emitted"] == 1
     assert metadata["processor"]["blocks_kept"] == 3
+
+
+def test_processor_drops_blocks_exceeding_max_chars(sample_policy: RawExtractionPolicy) -> None:
+    text = "A" * 2050
+    snapshot = _build_snapshot(text)
+    record = SnapshotRecord(snapshot=snapshot, metadata={"language_confidence": 0.99})
+    processor = RawExtractionProcessor(sample_policy)
+
+    records = processor.process(record)
+
+    assert records == []
+    assert processor.metrics.blocks_filtered_length == 1
+
+
+def test_extract_from_snapshots_writes_gzip_when_compressed(
+    tmp_path: Path, segmented_snapshot: SnapshotRecord
+) -> None:
+    payload = {
+        "snapshot": segmented_snapshot.snapshot.model_dump(mode="json"),
+        "language_confidence": 0.95,
+    }
+    input_path = tmp_path / "input.jsonl"
+    input_path.write_text(json.dumps(payload) + "\n", encoding="utf-8")
+
+    output_path = tmp_path / "records.jsonl"
+    result = extract_from_snapshots(input_path, output_path, compress=True)
+
+    records_files = result["records"]
+    assert isinstance(records_files, list)
+    assert len(records_files) == 1
+    gzip_path = Path(records_files[0])
+    assert gzip_path.suffixes[-2:] == [".jsonl", ".gz"]
+
+    with gzip.open(gzip_path, "rt", encoding="utf-8") as handle:
+        lines = [json.loads(line) for line in handle.read().splitlines() if line]
+
+    assert len(lines) == 3
+    assert all(isinstance(entry, dict) for entry in lines)
+
+    metadata_path = Path(result["metadata"])
+    assert metadata_path.name.endswith(".jsonl.gz.stats.json")
 
 
 def test_processor_writes_quarantine_on_failure(

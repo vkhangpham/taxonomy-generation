@@ -25,10 +25,20 @@ class RecordWriter:
         compress: bool | None = None,
     ) -> Path:
         path = Path(output_path)
-        ensure_directory(path.parent)
 
         if compress is None:
             compress = path.suffix.endswith(".gz")
+
+        if compress and not str(path).endswith(".gz"):
+            adjusted_path = Path(f"{path}.gz")
+            self._logger.debug(
+                "Adjusting compressed output path to .gz suffix",
+                original=str(path),
+                adjusted=str(adjusted_path),
+            )
+            path = adjusted_path
+
+        ensure_directory(path.parent)
 
         temp_path = path.with_suffix(path.suffix + ".tmp")
         writer = gzip.open if compress else open
