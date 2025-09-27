@@ -7,6 +7,7 @@ from pathlib import Path
 import polars as pl
 import pytest
 import yaml
+from openpyxl import Workbook
 
 from taxonomy.config.settings import Settings
 from taxonomy.pipeline.s0_raw_extraction import (
@@ -170,3 +171,34 @@ def test_load_faculty_dataframe_raises_for_missing_file(tmp_path: Path) -> None:
     settings = Settings(config_dir=tmp_path)
     with pytest.raises(FileNotFoundError):
         load_faculty_dataframe(settings)
+
+
+def test_load_faculty_dataframe_raises_for_missing_sheet(tmp_path: Path) -> None:
+    workbook = tmp_path / "faculty.xlsx"
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "PresentSheet"
+    wb.save(workbook)
+
+    policy = _policy_template(workbook)
+    policy["level0_excel"]["sheets_to_process"] = ["NoSuchSheet"]
+
+    config = {
+        "environment": "development",
+        "paths": {
+            "data_dir": "data",
+            "output_dir": "output",
+            "cache_dir": ".cache",
+            "logs_dir": "logs",
+            "metadata_dir": "metadata",
+        },
+        "random_seed": 1,
+        "policies": policy,
+    }
+    (tmp_path / "default.yaml").write_text(yaml.safe_dump(config), encoding="utf-8")
+    settings = Settings(config_dir=tmp_path)
+    with pytest.raises(ValueError) as excinfo:
+        load_faculty_dataframe(settings)
+    message = str(excinfo.value)
+    assert "NoSuchSheet" in message
+    assert str(workbook) in message

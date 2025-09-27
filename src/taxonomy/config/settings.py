@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import os
 from functools import lru_cache
@@ -78,7 +79,11 @@ def _apply_env_overrides(base: Dict[str, Any]) -> Dict[str, Any]:
         cursor = result
         for part in path[:-1]:
             cursor = cursor.setdefault(part, {})
-        cursor[path[-1]] = value
+        try:
+            parsed = json.loads(value)
+        except (TypeError, json.JSONDecodeError):
+            parsed = value
+        cursor[path[-1]] = parsed
     return result
 
 

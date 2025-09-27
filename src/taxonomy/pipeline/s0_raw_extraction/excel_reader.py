@@ -28,8 +28,10 @@ def load_faculty_dataframe(settings: Settings | None = None) -> pl.DataFrame:
         label = sheet if sheet is not None else "<default>"
         try:
             frame = pl.read_excel(workbook_path, sheet_name=sheet)
-        except pl.exceptions.PolarsError as exc:  # pragma: no cover - surfaced as ValueError
-            raise ValueError(f"Failed to parse sheet '{label}': {exc}") from exc
+        except Exception as exc:  # pragma: no cover - surfaced as ValueError
+            raise ValueError(
+                f"Failed to parse sheet '{label}' from '{workbook_path}': {exc}"
+            ) from exc
         frame = frame.with_columns(pl.lit(label).alias("sheet_name"))
         frames.append(frame)
         logger.debug("Loaded Excel sheet", sheet=label, row_count=frame.height, columns=frame.columns)
@@ -130,13 +132,14 @@ def _iter_colleges(row: dict, seed: int) -> Iterable[str]:
 def generate_source_records(settings: Settings | None = None) -> List[SourceRecord]:
     """Convert Excel-derived colleges into SourceRecord instances.
 
-    The call to :meth:`settings.paths.ensure_exists` makes the filesystem side
-    effects explicit for callers that expect output or cache directories to be
-    present.
+    When :attr:`Settings.create_dirs` is true this call creates the configured
+    directories via :meth:`settings.paths.ensure_exists`, making the side effect
+    explicit for callers that depend on the filesystem layout.
     """
 
     settings = settings or get_settings()
-    settings.paths.ensure_exists()
+    if settings.create_dirs:
+        settings.paths.ensure_exists()
     excel_policy = settings.policies.level0_excel
     df = load_faculty_dataframe(settings)
     summary = count_colleges_per_institution(df)

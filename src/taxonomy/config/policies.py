@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -151,7 +152,11 @@ def _resolve_env_overrides(raw: dict) -> dict:
         cursor = raw
         for part in path[:-1]:
             cursor = cursor.setdefault(part, {})
-        cursor[path[-1]] = value
+        try:
+            parsed = json.loads(value)
+        except (TypeError, json.JSONDecodeError):
+            parsed = value
+        cursor[path[-1]] = parsed
     return raw
 
 
