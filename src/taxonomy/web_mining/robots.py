@@ -41,7 +41,8 @@ class RobotsChecker:
         self._logger = get_logger(component="robots", user_agent=user_agent)
 
     def _default_fetcher(self, url: str) -> Tuple[int, str]:
-        response = requests.get(url, timeout=self.request_timeout_seconds)
+        headers = {"User-Agent": self.user_agent}
+        response = requests.get(url, headers=headers, timeout=self.request_timeout_seconds)
         return response.status_code, response.text
 
     def _robots_url(self, url: str) -> str:
@@ -54,7 +55,24 @@ class RobotsChecker:
         if cache_entry and (datetime.now(timezone.utc) - cache_entry.fetched_at).total_seconds() < self.cache_ttl_seconds:
             return cache_entry
 
-        status_code, body = self._fetcher(robots_url)
+        try:
+            status_code, body = self._fetcher(robots_url)
+        except Exception as exc:  # pragma: no cover - defensive
+            self._logger.warning(
+                "Robots fetch failed; allowing crawl by default",
+                robots_url=robots_url,
+                error=str(exc),
+            )
+            return self._allow_all_entry(robots_url)
+
+        if status_code >= 400:
+            self._logger.debug(
+                "Robots fetch returned non-success status; allowing",
+                robots_url=robots_url,
+                status_code=status_code,
+            )
+            return self._allow_all_entry(robots_url)
+
         parser = RobotFileParser()
         parser.set_url(robots_url)
         parser.parse(body.splitlines())
@@ -71,6 +89,23 @@ class RobotsChecker:
         )
         self._cache[robots_url] = entry
         self._logger.debug("Fetched robots.txt", robots_url=robots_url, status_code=status_code)
+        return entry
+
+    def _allow_all_entry(self, robots_url: str) -> RobotsCacheEntry:
+        parser = RobotFileParser()
+        parser.set_url(robots_url)
+        parser.parse([])
+        entry = RobotsCacheEntry(
+            parser=parser,
+            info=RobotsInfo(
+                robots_url=robots_url,
+                crawl_delay=None,
+                sitemaps=[],
+                fetched_at=datetime.now(timezone.utc),
+            ),
+            fetched_at=datetime.now(timezone.utc),
+        )
+        self._cache[robots_url] = entry
         return entry
 
     def is_allowed(self, url: str) -> bool:

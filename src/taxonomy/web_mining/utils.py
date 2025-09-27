@@ -71,8 +71,29 @@ def should_follow(url: str, allowed_domains: Sequence[str], disallowed_paths: Se
 def clean_text(text: str) -> str:
     """Normalize whitespace while preserving semantic boundaries."""
 
-    collapsed = " ".join(text.split())
-    return collapsed.strip()
+    if not text:
+        return ""
+
+    lines = [" ".join(line.split()) for line in text.splitlines()]
+    cleaned: list[str] = []
+    previous_blank = False
+    for line in lines:
+        stripped = line.strip()
+        if not stripped:
+            if previous_blank:
+                continue
+            previous_blank = True
+            cleaned.append("")
+        else:
+            previous_blank = False
+            cleaned.append(stripped)
+
+    while cleaned and cleaned[0] == "":
+        cleaned.pop(0)
+    while cleaned and cleaned[-1] == "":
+        cleaned.pop()
+
+    return "\n".join(cleaned)
 
 
 def generate_checksum(text: str) -> str:

@@ -16,6 +16,11 @@ from requests.exceptions import RequestException
 from xml.etree import ElementTree as ET
 
 try:  # pragma: no cover - optional dependency
+    from bs4 import BeautifulSoup
+except Exception:  # pragma: no cover - fallback path
+    BeautifulSoup = None
+
+try:  # pragma: no cover - optional dependency
     from firecrawl.v2 import FirecrawlClient
     from firecrawl.v2.types import Document
 except Exception:  # pragma: no cover - fallback path
@@ -310,6 +315,11 @@ class WebMiner:
                     metrics.increment("urls_queued")
 
         result.budget_status = session.budget
+        metrics.record_budget(
+            pages_fetched=session.budget.pages_fetched,
+            bytes_downloaded=session.budget.bytes_downloaded,
+            elapsed_seconds=session.budget.elapsed_seconds(),
+        )
         result.merge_metrics(metrics.finalize())
         result.errors.extend(session.errors)
         return result
@@ -502,14 +512,39 @@ class WebMiner:
         return urls
 
     def _discover_links(self, html: str, base_url: str) -> Sequence[str]:
-        anchors = re.findall(r"<a[^>]+href=\"([^\"]+)\"", html, flags=re.IGNORECASE)
-        normalized: List[str] = []
-        for href in anchors:
+        seen: set[str] = set()
+        discovered: List[str] = []
+
+        def add_candidate(raw_href: str) -> None:
+            href = raw_href.strip()
+            if not href:
+                return
             try:
-                normalized.append(canonicalize_url(href, base=base_url))
+                normalized = canonicalize_url(href, base=base_url)
             except Exception:
-                continue
-        return normalized
+                return
+            if normalized in seen:
+                return
+            seen.add(normalized)
+            discovered.append(normalized)
+
+        if BeautifulSoup is not None:
+            soup = BeautifulSoup(html, "html.parser")
+            for anchor in soup.find_all("a", href=True):
+                href_value = anchor["href"]
+                if isinstance(href_value, list):  # pragma: no cover - defensive
+                    for option in href_value:
+                        add_candidate(str(option))
+                else:
+                    add_candidate(str(href_value))
+            return discovered
+
+        pattern = re.compile(r"<a[^>]+href\s*=\s*(?:\"([^\"]+)\"|'([^']+)'|([^\s>]+))", re.IGNORECASE)
+        for match in pattern.finditer(html):
+            href = next((group for group in match.groups() if group), "")
+            if href:
+                add_candidate(href)
+        return discovered
 
 
 __all__ = ["WebMiner", "FetchResponse"]

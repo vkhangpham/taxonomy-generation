@@ -57,6 +57,11 @@ class MetricsCollector:
         if robots_blocked:
             self.increment("robots_blocked")
 
+    def record_budget(self, *, pages_fetched: int, bytes_downloaded: int, elapsed_seconds: float) -> None:
+        self._counters["budget_pages_fetched"] = pages_fetched
+        self._counters["budget_bytes_downloaded"] = bytes_downloaded
+        self._counters["budget_elapsed_seconds"] = elapsed_seconds
+
     def finalize(self) -> Dict[str, float | int | List[str]]:
         summary: Dict[str, float | int | List[str]] = dict(self._counters)
         for name, values in self._timings.items():

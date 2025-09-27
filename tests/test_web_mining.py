@@ -7,8 +7,11 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
+import yaml
 
+from taxonomy.config.policies import load_policies
 from taxonomy.entities.core import PageSnapshot, PageSnapshotMeta
+from taxonomy.web_mining import build_web_miner
 from taxonomy.web_mining.cache import CacheManager
 from taxonomy.web_mining.client import FetchError, FetchResponse, WebMiner
 from taxonomy.web_mining.content import ContentPolicyError, ContentProcessor, LanguageDetectionResult
@@ -192,6 +195,36 @@ def test_fetch_url_respects_content_length_budget(
     assert excinfo.value.retryable is False
 
 
+def test_discover_links_handles_varied_formats(
+    cache: CacheManager,
+    content_processor: ContentProcessor,
+    robots_checker: RobotsChecker,
+) -> None:
+    miner = WebMiner(
+        cache=cache,
+        content_processor=content_processor,
+        robots_checker=robots_checker,
+        user_agent="TestBot/1.0",
+        max_concurrency=1,
+        rate_limit_per_sec=10.0,
+    )
+
+    html = (
+        "<html><body>"
+        "<a href='/about'>About</a>"
+        "<a href='https://example.org/contact'>Contact</a>"
+        "<a href=https://example.edu/faq>FAQ</a>"
+        "<a href=\"mailto:info@example.edu\">Mail</a>"
+        "</body></html>"
+    )
+    links = miner._discover_links(html, "https://example.edu/start")
+
+    assert "https://example.edu/about" in links
+    assert "https://example.org/contact" in links
+    assert "https://example.edu/faq" in links
+    assert not any(link.startswith("mailto:") for link in links)
+
+
 def test_crawl_institution_prioritizes_include_patterns(
     cache: CacheManager,
     content_processor: ContentProcessor,
@@ -288,6 +321,8 @@ def test_crawl_institution_prioritizes_include_patterns(
 
     assert fetched_order[:2] == [seed_url, include_url]
     assert any(snapshot.url == include_url for snapshot in result.snapshots)
+    assert result.metrics.get("budget_pages_fetched", 0) >= len(result.snapshots)
+    assert result.metrics.get("budget_elapsed_seconds", 0.0) >= 0.0
 
 
 def test_crawl_institution_seeds_from_sitemap_respecting_budget(
@@ -450,7 +485,11 @@ def test_cache_manager_ttl_override(tmp_path: Path) -> None:
 
 
 def test_content_processor_extracts_text(content_processor: ContentProcessor) -> None:
-    html = """<html><head><title>Sample</title></head><body><p>Hello <b>World</b></p></body></html>"""
+    html = (
+        "<html><head><title>Sample</title>"
+        "<meta name=\"description\" content=\"Example description\"></head>"
+        "<body><p>Hello <b>World</b></p></body></html>"
+    )
     snapshot, meta = content_processor.process(
         institution="demo",
         url="https://example.edu/sample",
@@ -461,6 +500,9 @@ def test_content_processor_extracts_text(content_processor: ContentProcessor) ->
     assert "Hello" in snapshot.text
     assert snapshot.checksum
     assert meta.quality.text_length > 0
+    assert meta.title == "Sample"
+    assert meta.description == "Example description"
+    assert snapshot.lang == "en"
 
 
 def test_content_processor_enforces_min_text_length() -> None:
@@ -546,11 +588,83 @@ def test_content_processor_records_pdf_metric(monkeypatch: pytest.MonkeyPatch) -
     assert summary.get("pdf_extracted") == 1
 
 
+def test_content_processor_preserves_list_markers(content_processor: ContentProcessor) -> None:
+    html = "<html><body><ul><li>First item</li><li>Second item</li></ul></body></html>"
+    snapshot, _ = content_processor.process(
+        institution="demo",
+        url="https://example.edu/lists",
+        http_status=200,
+        content_type="text/html",
+        body=html,
+    )
+    lines = [line for line in snapshot.text.splitlines() if line]
+    assert "- First item" in lines
+    assert "- Second item" in lines
+
+
+def test_content_processor_decodes_declared_charset() -> None:
+    processor = ContentProcessor(language_allowlist=[], min_text_length=0, pdf_extraction_enabled=False)
+    body = "<html><body>caf\xe9</body></html>".encode("windows-1252")
+    snapshot, _ = processor.process(
+        institution="demo",
+        url="https://example.edu/charset",
+        http_status=200,
+        content_type="text/html; charset=windows-1252",
+        body=body,
+    )
+    assert "café" in snapshot.text
+
+
+def test_content_processor_decodes_utf8_payload() -> None:
+    processor = ContentProcessor(language_allowlist=[], min_text_length=0, pdf_extraction_enabled=False)
+    body = "<html><body>こんにちは</body></html>".encode("utf-8")
+    snapshot, _ = processor.process(
+        institution="demo",
+        url="https://example.edu/utf8",
+        http_status=200,
+        content_type="text/html",
+        body=body,
+    )
+    assert "こんにちは" in snapshot.text
+
+
 def test_robots_checker_allows_and_blocks(robots_checker: RobotsChecker) -> None:
     allowed = robots_checker.is_allowed("https://example.edu/index")
     blocked = robots_checker.is_allowed("https://example.edu/private/data")
     assert allowed is True
     assert blocked is False
+
+
+def test_robots_default_fetcher_sets_user_agent(monkeypatch: pytest.MonkeyPatch) -> None:
+    from taxonomy.web_mining import robots as robots_module
+
+    captured: dict[str, str] = {}
+
+    class _Response:
+        status_code = 200
+        text = "User-agent: *\nAllow: /"
+
+    def fake_get(url: str, headers: dict[str, str] | None = None, timeout: float | None = None) -> _Response:
+        captured.update(headers or {})
+        return _Response()
+
+    monkeypatch.setattr(robots_module.requests, "get", fake_get)
+
+    checker = RobotsChecker(user_agent="PolicyBot/2.0")
+    status, body = checker._default_fetcher("https://example.edu/robots.txt")
+    assert status == 200
+    assert body.startswith("User-agent")
+    assert captured.get("User-Agent") == "PolicyBot/2.0"
+
+
+@pytest.mark.parametrize("status_code", [404, 500])
+def test_robots_checker_allows_on_error(status_code: int) -> None:
+    checker = RobotsChecker(
+        user_agent="TestBot/1.0",
+        cache_ttl_seconds=0,
+        fetcher=lambda url: (status_code, ""),
+    )
+    assert checker.is_allowed("https://example.edu/protected") is True
 
 
 def test_is_allowed_domain_strict_suffix_matching() -> None:
@@ -559,6 +673,27 @@ def test_is_allowed_domain_strict_suffix_matching() -> None:
     assert is_allowed_domain("https://sub.example.edu/path", allowed)
     assert not is_allowed_domain("https://badexample.edu/page", allowed)
     assert is_allowed_domain("https://example.edu", [".example.edu"])
+
+
+def test_build_web_miner_factory(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    config_path = Path(__file__).resolve().parents[1] / "config" / "default.yaml"
+    raw = yaml.safe_load(config_path.read_text())
+    policies = load_policies(raw["policies"])
+
+    monkeypatch.delenv("FIRECRAWL_API_KEY", raising=False)
+
+    miner = build_web_miner(policies, tmp_path)
+
+    cache_settings = policies.web.cache
+    expected_cache_dir = Path(cache_settings.cache_directory).expanduser()
+    if not expected_cache_dir.is_absolute():
+        expected_cache_dir = (tmp_path / expected_cache_dir).resolve()
+
+    assert miner.cache.cache_dir == expected_cache_dir
+    assert miner.content_processor.pdf_size_limit_mb == policies.web.content.pdf_size_limit_mb
+    assert miner.robots_checker.cache_ttl_seconds == policies.web.robots_cache_ttl_hours * 3600
+    assert miner.user_agent == policies.web.firecrawl.user_agent
+    assert miner.rate_limiter.rate_per_second == float(policies.web.firecrawl.concurrency)
 
 
 def test_web_miner_crawl_flow(cache: CacheManager, content_processor: ContentProcessor, robots_checker: RobotsChecker, monkeypatch: pytest.MonkeyPatch) -> None:
