@@ -16,6 +16,9 @@ from taxonomy.utils import (
 from taxonomy.utils.phonetic import phonetic_bucket_keys
 
 
+_ACRONYM_ALIAS_LIMIT = 3
+
+
 @dataclass
 class BlockingMetrics:
     """Aggregate statistics describing block creation."""
@@ -124,7 +127,17 @@ class AcronymBlocker(BlockingStrategy):
     def build_blocks(self, concepts: Sequence[Concept]) -> Dict[str, List[Concept]]:
         buckets: Dict[str, List[Concept]] = defaultdict(list)
         for concept in concepts:
-            candidates = [concept.canonical_label, *concept.aliases]
+            alias_candidates: List[str] = []
+            seen_aliases: set[str] = set()
+            for alias in concept.aliases:
+                normalized = alias.strip().lower()
+                if not normalized or normalized in seen_aliases:
+                    continue
+                seen_aliases.add(normalized)
+                alias_candidates.append(alias)
+                if len(alias_candidates) >= _ACRONYM_ALIAS_LIMIT:
+                    break
+            candidates = [concept.canonical_label, *alias_candidates]
             for candidate in candidates:
                 acronym = detect_acronym(candidate)
                 if acronym:

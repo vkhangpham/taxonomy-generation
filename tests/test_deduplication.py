@@ -1,7 +1,12 @@
 import pytest
 from taxonomy.config.policies import DeduplicationPolicy, DeduplicationThresholds
 from taxonomy.entities.core import Concept, SupportStats
-from taxonomy.pipeline.deduplication.blocking import CompositeBlocker, PrefixBlocker
+from taxonomy.pipeline.deduplication.blocking import (
+    AcronymBlocker,
+    CompositeBlocker,
+    PrefixBlocker,
+    _ACRONYM_ALIAS_LIMIT,
+)
 from taxonomy.pipeline.deduplication.processor import DeduplicationProcessor
 from taxonomy.pipeline.deduplication.similarity import SimilarityScorer
 
@@ -117,6 +122,21 @@ def test_similarity_score_capped_and_hint_driver() -> None:
     assert "suffix_prefix_hint" in decision.features.weighted
 
 
+def test_acronym_blocker_limits_aliases_and_splits_blocks() -> None:
+    policy = base_policy(acronym_blocking_enabled=True, max_block_size=2)
+    blocker = AcronymBlocker(policy)
+    alias_variants = ["AB", "A.B.", "A-B", "A/B", "A B"]
+    concept = make_concept("c_alias", "Alpha Beta", aliases=alias_variants)
+
+    blocks = blocker.build_blocks([concept])
+    acronym_blocks = {key: members for key, members in blocks.items() if key.startswith("acronym:AB")}
+
+    assert len(acronym_blocks) == 2
+    assert all(len(members) <= policy.max_block_size for members in acronym_blocks.values())
+    total_members = sum(len(members) for members in acronym_blocks.values())
+    assert total_members == min(len(alias_variants), _ACRONYM_ALIAS_LIMIT) + 1
+
+
 def test_phonetic_probe_filters_pairs() -> None:
     policy = base_policy(phonetic_probe_threshold=0.95)
     processor = DeduplicationProcessor(policy)
@@ -130,3 +150,19 @@ def test_phonetic_probe_filters_pairs() -> None:
 
     assert stats.get("phonetic_probe_filtered", 0) == 1
     assert stats.get("pairs_compared", 0) == 0
+
+
+def test_merge_evidence_includes_suffix_hint() -> None:
+    policy = base_policy(min_similarity_threshold=0.6, heuristic_suffixes=["systems"])
+    processor = DeduplicationProcessor(policy)
+    base = make_concept("c11", "Control", parents=["root"])
+    suffixed = make_concept("c12", "Control Systems", parents=["root"])
+
+    result = processor.process([base, suffixed])
+
+    assert result.merge_ops
+    merge_op = result.merge_ops[0]
+    assert merge_op.evidence is not None
+    loser_id = merge_op.losers[0]
+    loser_evidence = merge_op.evidence[loser_id]
+    assert loser_evidence["features"]["suffix_prefix_hint"] == pytest.approx(1.0)

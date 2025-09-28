@@ -239,7 +239,7 @@ class ValidationFinding(BaseModel):
     mode: FindingMode
     passed: bool
     detail: str = Field(..., min_length=1)
-    evidence: Dict[str, str] | None = Field(default=None)
+    evidence: Dict[str, Any] | None = Field(default=None)
 
     @field_validator("detail")
     @classmethod
@@ -257,7 +257,7 @@ class MergeOp(BaseModel):
     winners: List[str] = Field(..., min_length=1)
     losers: List[str] = Field(..., min_length=1)
     rule: str = Field(..., min_length=1)
-    evidence: Dict[str, str] | None = Field(default=None)
+    evidence: Dict[str, Any] | None = Field(default=None)
     performed_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
     @model_validator(mode="after")
@@ -276,7 +276,7 @@ class SplitOp(BaseModel):
     source_id: str = Field(..., min_length=1)
     new_ids: List[str] = Field(..., min_length=1)
     rule: str = Field(..., min_length=1)
-    evidence: Dict[str, str] | None = Field(default=None)
+    evidence: Dict[str, Any] | None = Field(default=None)
     performed_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
     @model_validator(mode="after")

@@ -93,16 +93,19 @@ class SimilarityGraph:
         ordered = tuple(sorted((node_a, node_b)))
         self.add_node(node_a)
         self.add_node(node_b)
+        feature_map = {
+            "jaro_winkler": decision.features.jaro_winkler,
+            "token_jaccard": decision.features.token_jaccard,
+            "abbrev_score": decision.features.abbrev_score,
+        }
+        if decision.features.suffix_prefix_hint > 0.0:
+            feature_map["suffix_prefix_hint"] = decision.features.suffix_prefix_hint
         metadata = EdgeMetadata(
             score=decision.score,
             threshold=decision.threshold,
             driver=decision.driver,
             block=block,
-            features={
-                "jaro_winkler": decision.features.jaro_winkler,
-                "token_jaccard": decision.features.token_jaccard,
-                "abbrev_score": decision.features.abbrev_score,
-            },
+            features=feature_map,
             weighted=dict(decision.features.weighted),
         )
         self.edges[ordered] = metadata

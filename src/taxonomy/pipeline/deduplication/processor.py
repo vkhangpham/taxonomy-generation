@@ -16,7 +16,11 @@ from taxonomy.pipeline.deduplication.blocking import (
     PrefixBlocker,
 )
 from taxonomy.pipeline.deduplication.graph import SimilarityGraph
-from taxonomy.pipeline.deduplication.merger import ConceptMerger, MergeOutcome
+from taxonomy.pipeline.deduplication.merger import (
+    ConceptMerger,
+    MergeOutcome,
+    ParentCompatibilityError,
+)
 from taxonomy.pipeline.deduplication.similarity import SimilarityScorer
 from taxonomy.utils import jaro_winkler_similarity
 from taxonomy.utils.logging import get_logger
@@ -124,7 +128,12 @@ class DeduplicationProcessor:
             if len(component) < 2:
                 continue
             concepts = [concept_lookup[cid] for cid in sorted(component)]
-            outcome: MergeOutcome = self.merger.merge(concepts, self.graph)
+            try:
+                outcome: MergeOutcome = self.merger.merge(concepts, self.graph)
+            except ParentCompatibilityError:
+                stats.setdefault("merges_skipped_parent_policy", 0)
+                stats["merges_skipped_parent_policy"] += 1
+                continue
             surviving[outcome.winner.id] = outcome.winner
             for loser in outcome.losers:
                 surviving.pop(loser.id, None)
