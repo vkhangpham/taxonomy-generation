@@ -266,12 +266,34 @@ class RunManifest:
             return None
 
     def _integrate_observability(self) -> None:
-        if not self._observability or not self._observability_manifest:
+        if not self._observability:
             return
-        snapshot = self._observability_manifest.snapshot()
-        exported = self._observability_manifest.build_payload()
+
+        manifest = self._ensure_observability_manifest()
+        if manifest is None:
+            return
+
+        snapshot = manifest.snapshot()
+        exported = manifest.build_payload()
         self._observability_snapshot = snapshot
-        self._data["observability"] = exported
+
+        metadata_dir = self._metadata_directory()
+        if metadata_dir is None:
+            _LOGGER.warning(
+                "Metadata directory unavailable; embedding observability payload in run manifest",
+                run_id=self.run_id,
+            )
+            self._data["observability"] = exported
+        else:
+            observability_path = serialize_json(
+                exported,
+                metadata_dir / f"{self.run_id}.observability.json",
+            )
+            self._data["observability"] = {
+                "path": str(observability_path),
+                "checksum": stable_hash(exported),
+            }
+            self.add_artifact(observability_path, kind="observability")
 
         evidence_samples: list[Dict[str, Any]] = []
         for phase, samples in exported.get("evidence", {}).get("samples", {}).items():
@@ -288,7 +310,10 @@ class RunManifest:
         legacy_logs.extend(exported.get("operations", []))
         self._data["operation_logs"] = legacy_logs
 
-        self._data.setdefault("prompt_versions", {}).update(exported.get("prompt_versions", {}))
+        prompt_versions = self._coerce_prompt_versions(exported.get("prompt_versions", {}))
+        if prompt_versions:
+            self._data.setdefault("prompt_versions", {}).update(prompt_versions)
+
         self._data.setdefault("configuration", {}).setdefault("seeds", {}).update(
             exported.get("seeds", {})
         )
