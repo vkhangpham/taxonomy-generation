@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from contextlib import nullcontext
 from dataclasses import dataclass
-from typing import Callable, Dict, List, Sequence, TYPE_CHECKING
+from time import perf_counter
+from typing import Callable, Dict, List, Mapping, Sequence, TYPE_CHECKING
 
 from taxonomy.entities.core import SourceRecord
 from taxonomy.llm import (
@@ -17,7 +18,6 @@ from taxonomy.utils.logging import get_logger
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from taxonomy.observability import ObservabilityContext, PhaseHandle
-
 
 @dataclass
 class RawExtractionCandidate:
@@ -32,7 +32,7 @@ class RawExtractionCandidate:
 
 @dataclass
 class ExtractionMetrics:
-    """Counters tracked for observability and testing."""
+    """Counters tracked for legacy compatibility in S1 extraction."""
 
     records_in: int = 0
     candidates_out: int = 0
@@ -40,6 +40,52 @@ class ExtractionMetrics:
     quarantined: int = 0
     provider_errors: int = 0
     retries: int = 0
+
+    @classmethod
+    def from_observability(
+        cls,
+        context: "ObservabilityContext" | None,
+    ) -> "ExtractionMetrics":
+        """Create a metrics snapshot backed by the observability registry."""
+
+        if context is None:
+            return cls()
+        snapshot = context.snapshot()
+        counters = snapshot.counters.get("S1", {})
+        quarantined_items = snapshot.quarantine.get("items", [])
+        quarantined = sum(
+            1
+            for entry in quarantined_items
+            if isinstance(entry, Mapping) and entry.get("phase") == "S1"
+        )
+        provider_errors = sum(
+            1
+            for entry in snapshot.operations
+            if entry.phase == "S1" and entry.operation == "provider_error"
+        )
+        invalid_json = sum(
+            1
+            for entry in snapshot.operations
+            if entry.phase == "S1" and entry.operation == "invalid_json"
+        )
+        return cls(
+            records_in=int(counters.get("records_in", 0)),
+            candidates_out=int(counters.get("candidates_out", 0)),
+            invalid_json=int(invalid_json),
+            quarantined=int(quarantined),
+            provider_errors=int(provider_errors),
+            retries=int(counters.get("retries", 0)),
+        )
+
+    def as_dict(self) -> Dict[str, int]:
+        return {
+            "records_in": self.records_in,
+            "candidates_out": self.candidates_out,
+            "invalid_json": self.invalid_json,
+            "quarantined": self.quarantined,
+            "provider_errors": self.provider_errors,
+            "retries": self.retries,
+        }
 
 
 class ExtractionProcessor:
@@ -53,10 +99,26 @@ class ExtractionProcessor:
         observability: "ObservabilityContext" | None = None,
     ) -> None:
         self._runner = runner or self._default_runner
-        self.metrics = ExtractionMetrics()
+        self._legacy_metrics = ExtractionMetrics()
         self._log = get_logger(module=__name__)
         self._max_retries = max(0, max_retries)
         self._observability = observability
+
+    @property
+    def metrics(self) -> ExtractionMetrics:
+        if self._observability is not None:
+            return ExtractionMetrics.from_observability(self._observability)
+        return self._legacy_metrics
+
+    @property
+    def observability(self) -> "ObservabilityContext" | None:
+        return self._observability
+
+    def _increment_legacy(self, field: str, delta: int = 1) -> None:
+        if self._observability is not None:
+            return
+        current = getattr(self._legacy_metrics, field)
+        setattr(self._legacy_metrics, field, current + delta)
 
     def bind_observability(self, context: "ObservabilityContext") -> None:
         self._observability = context
@@ -77,15 +139,25 @@ class ExtractionProcessor:
     ) -> List[RawExtractionCandidate]:
         """Extract candidate payloads for *records* at the requested level."""
 
-        obs = observability or self._observability
+        if observability is not None:
+            self._observability = observability
+        obs = self._observability
         phase_cm = obs.phase("S1") if obs is not None else nullcontext()
         results: List[RawExtractionCandidate] = []
+        batch_start = perf_counter()
         with phase_cm as phase:
             phase_handle: "PhaseHandle" | None = phase if obs is not None else None
             for record in records:
-                self.metrics.records_in += 1
+                self._increment_legacy("records_in")
                 if phase_handle is not None:
                     phase_handle.increment("records_in")
+                    phase_handle.log_operation(
+                        operation="record_ingest",
+                        payload={
+                            "institution": record.provenance.institution,
+                            "level": level,
+                        },
+                    )
                 base_variables = {
                     "institution": record.provenance.institution,
                     "level": level,
@@ -103,7 +175,7 @@ class ExtractionProcessor:
                         payload = self._runner("taxonomy.extract", variables)
                         break
                     except ValidationError as exc:
-                        self.metrics.invalid_json += 1
+                        self._increment_legacy("invalid_json")
                         final_error = str(exc)
                         error_reason = "invalid_json"
                         self._log.warning(
@@ -112,6 +184,15 @@ class ExtractionProcessor:
                             institution=record.provenance.institution,
                             attempt=attempt,
                         )
+                        if phase_handle is not None:
+                            phase_handle.log_operation(
+                                operation="invalid_json",
+                                outcome="error",
+                                payload={
+                                    "institution": record.provenance.institution,
+                                    "attempt": attempt,
+                                },
+                            )
                         if attempt >= self._max_retries:
                             payload = None
                             if phase_handle is not None:
@@ -128,12 +209,12 @@ class ExtractionProcessor:
                                     },
                                 )
                             break
-                        self.metrics.retries += 1
+                        self._increment_legacy("retries")
                         if phase_handle is not None:
                             phase_handle.increment("retries")
                         continue
                     except ProviderError as exc:
-                        self.metrics.provider_errors += 1
+                        self._increment_legacy("provider_errors")
                         final_error = str(exc)
                         error_reason = "provider_error"
                         self._log.error(
@@ -143,6 +224,16 @@ class ExtractionProcessor:
                             attempt=attempt,
                         )
                         retryable = getattr(exc, "retryable", False)
+                        if phase_handle is not None:
+                            phase_handle.log_operation(
+                                operation="provider_error",
+                                outcome="retry" if retryable else "failure",
+                                payload={
+                                    "institution": record.provenance.institution,
+                                    "attempt": attempt,
+                                    "retryable": retryable,
+                                },
+                            )
                         if (not retryable) or attempt >= self._max_retries:
                             payload = None
                             if phase_handle is not None and not retryable:
@@ -158,12 +249,12 @@ class ExtractionProcessor:
                                     },
                                 )
                             break
-                        self.metrics.retries += 1
+                        self._increment_legacy("retries")
                         if phase_handle is not None:
                             phase_handle.increment("retries")
                         continue
                     except QuarantineError as exc:
-                        self.metrics.quarantined += 1
+                        self._increment_legacy("quarantined")
                         final_error = str(exc)
                         error_reason = "quarantined"
                         self._log.error(
@@ -183,6 +274,14 @@ class ExtractionProcessor:
                                     "institution": record.provenance.institution,
                                     "level": level,
                                     "error": final_error,
+                                },
+                            )
+                            phase_handle.log_operation(
+                                operation="llm_quarantine",
+                                outcome="error",
+                                payload={
+                                    "institution": record.provenance.institution,
+                                    "attempt": attempt,
                                 },
                             )
                         break
@@ -207,10 +306,17 @@ class ExtractionProcessor:
                 raw_candidates = self._coerce_payload(payload, record)
                 results.extend(raw_candidates)
                 produced = len(raw_candidates)
-                self.metrics.candidates_out += produced
+                self._increment_legacy("candidates_out", produced)
                 if phase_handle is not None:
                     if produced:
                         phase_handle.increment("candidates_out", value=produced)
+                        phase_handle.log_operation(
+                            operation="candidates_emitted",
+                            payload={
+                                "institution": record.provenance.institution,
+                                "count": produced,
+                            },
+                        )
                         phase_handle.evidence(
                             category="extraction",
                             outcome="success",
@@ -232,6 +338,15 @@ class ExtractionProcessor:
                                 "error": "no_candidates_emitted",
                             },
                         )
+            if phase_handle is not None:
+                elapsed = perf_counter() - batch_start
+                phase_handle.performance(
+                    {
+                        "elapsed_seconds": elapsed,
+                        "records": len(records),
+                        "raw_candidates": len(results),
+                    }
+                )
         return results
 
     def _coerce_payload(

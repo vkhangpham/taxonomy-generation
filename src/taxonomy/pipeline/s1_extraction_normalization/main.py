@@ -9,6 +9,7 @@ from typing import Dict, Iterable, Iterator, List, Sequence, Tuple
 
 from taxonomy.config.settings import Settings
 from taxonomy.entities.core import Candidate, Concept
+from taxonomy.observability import ObservabilityContext
 from taxonomy.utils.logging import get_logger, logging_context
 
 from .extractor import ExtractionProcessor
@@ -29,6 +30,7 @@ def extract_candidates(
     resume_from: str | Path | None = None,
     batch_size: int = 32,
     settings: Settings | None = None,
+    observability: ObservabilityContext | None = None,
 ) -> List[Candidate]:
     """High-level API for running the S1 pipeline.
 
@@ -38,14 +40,16 @@ def extract_candidates(
         previous_parents: Optional parents emitted by earlier levels to assist
             parent resolution.
         output_path: Optional destination for candidate JSONL output.
-        metadata_path: Optional metadata output file.  When omitted the path is
+        metadata_path: Optional metadata output file. When omitted the path is
             derived from *output_path* by appending ``.metadata.json``.
         settings: Optional pre-loaded :class:`Settings` instance.
+        observability: Optional observability context used for standardized
+            metrics, evidence, and quarantine tracking.
     """
 
     cfg = settings or Settings()
     label_policy = cfg.policies.label_policy
-    extractor = ExtractionProcessor()
+    extractor = ExtractionProcessor(observability=observability)
     normalizer = CandidateNormalizer(label_policy=label_policy)
     parent_index = ParentIndex(
         label_policy=label_policy,
@@ -56,6 +60,18 @@ def extract_candidates(
         normalizer=normalizer,
         parent_index=parent_index,
     )
+
+    obs_context = observability or extractor.observability
+    snapshot_before = obs_context.snapshot() if obs_context is not None else None
+    before_counters = snapshot_before.counters.get("S1", {}) if snapshot_before else {}
+    before_op_sequence = (
+        snapshot_before.operations[-1].sequence if snapshot_before and snapshot_before.operations else 0
+    )
+    before_quarantine_sequence = 0
+    if snapshot_before:
+        items_before = snapshot_before.quarantine.get("items", [])
+        if items_before:
+            before_quarantine_sequence = items_before[-1].get("sequence", 0)
 
     previous_parents = list(previous_parents or [])
     if previous_parents:
@@ -74,7 +90,7 @@ def extract_candidates(
 
     with logging_context(stage="s1", level=level, records=total_records):
         for batch in chunked(remaining_records, batch_size):
-            raw = extractor.extract_candidates(batch, level=level)
+            raw = extractor.extract_candidates(batch, level=level, observability=obs_context)
             normalized = normalizer.normalize(raw, level=level)
             aggregated_batch = processor._aggregate(normalized)
             _merge_aggregated_state(aggregated_state, aggregated_batch)
@@ -88,16 +104,50 @@ def extract_candidates(
         _stream_candidates(candidates, output_path)
         if metadata_path is None:
             metadata_path = Path(output_path).with_suffix(".metadata.json")
-        stats = {
-            "records_in": extractor.metrics.records_in,
-            "records_processed_total": processed_records,
-            "candidates_out": extractor.metrics.candidates_out,
-            "invalid_json": extractor.metrics.invalid_json,
-            "quarantined": extractor.metrics.quarantined,
-            "provider_errors": extractor.metrics.provider_errors,
-            "retries": extractor.metrics.retries,
-            "final_candidates": len(candidates),
-        }
+        obs_for_stats = obs_context
+        snapshot_after = obs_for_stats.snapshot() if obs_for_stats is not None else None
+        if snapshot_after is not None:
+            after_counters = snapshot_after.counters.get("S1", {})
+
+            def _delta(name: str) -> int:
+                before = int(before_counters.get(name, 0))
+                after = int(after_counters.get(name, 0))
+                return max(0, after - before)
+
+            provider_errors = sum(
+                1
+                for entry in snapshot_after.operations
+                if entry.phase == "S1"
+                and entry.operation == "provider_error"
+                and entry.sequence > before_op_sequence
+            )
+            quarantined = 0
+            items_after = snapshot_after.quarantine.get("items", [])
+            for item in items_after:
+                if item.get("phase") == "S1" and item.get("sequence", 0) > before_quarantine_sequence:
+                    quarantined += 1
+            stats = {
+                "records_in": _delta("records_in") or processed_records,
+                "records_processed_total": processed_records,
+                "candidates_out": _delta("candidates_out"),
+                "invalid_json": _delta("invalid_json"),
+                "quarantined": quarantined,
+                "provider_errors": int(provider_errors),
+                "retries": _delta("retries"),
+                "final_candidates": len(candidates),
+            }
+        else:
+            metrics = extractor.metrics
+            stats = {
+                "records_in": metrics.records_in,
+                "records_processed_total": processed_records,
+                "candidates_out": metrics.candidates_out,
+                "invalid_json": metrics.invalid_json,
+                "quarantined": metrics.quarantined,
+                "provider_errors": metrics.provider_errors,
+                "retries": metrics.retries,
+                "final_candidates": len(candidates),
+            }
         config_used = {
             "policy_version": cfg.policies.policy_version,
             "level": level,

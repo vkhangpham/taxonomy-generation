@@ -60,7 +60,6 @@ class Pipeline:
 
             self.completed_steps.append(step.name)
             if self.checkpoint_manager:
-                …
                 self.checkpoint_manager.save_phase_checkpoint(
                     f"pipeline::{step.name}", {"status": "completed"}
                 )

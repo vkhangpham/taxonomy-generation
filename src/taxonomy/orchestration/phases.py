@@ -1,6 +1,7 @@
 """Phase orchestration for the end-to-end taxonomy pipeline."""
 from __future__ import annotations
 
+from contextlib import nullcontext
 from dataclasses import dataclass, field
 from time import perf_counter
 from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence
@@ -35,6 +36,21 @@ class PhaseContext:
 
     def phase(self, name: str):
         return self.observability.phase(name)
+
+    def log_operation(
+        self,
+        phase: str,
+        *,
+        operation: str,
+        outcome: str = "success",
+        payload: Mapping[str, Any] | None = None,
+    ) -> None:
+        self.observability.record_operation(
+            phase=phase,
+            operation=operation,
+            outcome=outcome,
+            payload=payload,
+        )
 
 
 class PhaseManager:
@@ -79,6 +95,53 @@ class PhaseManager:
         )
         self._max_iterations = max_post_processing_iterations
 
+    def _run_with_observability(
+        self,
+        phase_name: str,
+        runner: Callable[[], Dict[str, Any]],
+        *,
+        metrics_builder: Callable[[Dict[str, Any]], Mapping[str, Any]] | None = None,
+        observability_phase: str | None = None,
+    ) -> Dict[str, Any]:
+        """Execute *runner* inside the observability phase context."""
+
+        metrics: Dict[str, Any] = {}
+        target_phase = observability_phase or phase_name
+        try:
+            self._observability.registry.ensure_phase(target_phase)
+        except KeyError:
+            phase_cm = nullcontext()
+        else:
+            phase_cm = self._observability.phase(target_phase)
+        with phase_cm as phase_handle:
+            if phase_handle is not None and hasattr(phase_handle, "log_operation"):
+                phase_handle.log_operation(operation="start")
+            start = perf_counter()
+            try:
+                payload = runner()
+            except Exception as exc:
+                elapsed = perf_counter() - start
+                if phase_handle is not None and hasattr(phase_handle, "performance"):
+                    phase_handle.performance({"elapsed_seconds": elapsed, "outcome": "error"})
+                    if hasattr(phase_handle, "log_operation"):
+                        phase_handle.log_operation(
+                            operation="failure",
+                            outcome="error",
+                            payload={"error": str(exc)},
+                        )
+                raise
+            elapsed = perf_counter() - start
+            metrics.update({"elapsed_seconds": elapsed})
+            if metrics_builder is not None:
+                extras = dict(metrics_builder(payload))
+                metrics.update(extras)
+            if phase_handle is not None and hasattr(phase_handle, "performance"):
+                phase_handle.performance(metrics)
+                if hasattr(phase_handle, "log_operation"):
+                    phase_handle.log_operation(operation="complete", payload=dict(metrics))
+        self._manifest.collect_performance_data(phase_name, metrics)
+        return payload
+
     # ------------------------------------------------------------------
     # Phase execution helpers
     # ------------------------------------------------------------------
@@ -88,10 +151,19 @@ class PhaseManager:
         if generator is None:
             raise KeyError(f"No level generator registered for level {level}")
         _LOGGER.info("Running level generation", level=level)
-        start = perf_counter()
-        payload = generator(self._context, level)
-        self._observability.record_performance(
-            phase=phase_name, metrics={"elapsed_seconds": perf_counter() - start}
+
+        def _runner() -> Dict[str, Any]:
+            return generator(self._context, level)
+
+        payload = self._run_with_observability(
+            phase_name,
+            _runner,
+            metrics_builder=lambda result: {
+                "level": level,
+                "records": result.get("stats", {}).get("records_in", 0),
+                "candidates": result.get("stats", {}).get("candidates_out", 0),
+            },
+            observability_phase="S1",
         )
         self._context.record(phase_name, payload)
         self._manifest.aggregate_statistics(phase_name, payload.get("stats", {}))
@@ -100,11 +172,18 @@ class PhaseManager:
 
     def consolidate_raw_universe(self) -> Dict[str, Any]:
         _LOGGER.info("Starting consolidation phase")
-        start = perf_counter()
-        payload = self._consolidator(self._context)
-        self._observability.record_performance(
-            phase=self.CONSOLIDATION_PHASE,
-            metrics={"elapsed_seconds": perf_counter() - start},
+
+        def _runner() -> Dict[str, Any]:
+            return self._consolidator(self._context)
+
+        payload = self._run_with_observability(
+            self.CONSOLIDATION_PHASE,
+            _runner,
+            metrics_builder=lambda result: {
+                "records": result.get("stats", {}).get("records_in", 0),
+                "level": "consolidation",
+            },
+            observability_phase="S2",
         )
         self._context.record(self.CONSOLIDATION_PHASE, payload)
         self._manifest.aggregate_statistics(
@@ -115,44 +194,58 @@ class PhaseManager:
 
     def run_post_processing(self) -> Dict[str, Any]:
         _LOGGER.info("Running post-processing pipeline")
-        iterations = 0
-        history: List[Dict[str, Any]] = []
-        changed = True
-        start = perf_counter()
-        while changed and iterations < self._max_iterations:
-            iterations += 1
-            changed = False
-            iteration_payload: Dict[str, Any] = {"iteration": iterations, "results": []}
-            for processor in self._post_processors:
-                result = processor(self._context)
-                iteration_payload["results"].append(result)
-                changed = changed or bool(result.get("changed"))
-            history.append(iteration_payload)
-            if not changed:
-                break
-        self._observability.record_performance(
-            phase=self.POST_PROCESSING_PHASE,
-            metrics={"elapsed_seconds": perf_counter() - start, "iterations": iterations},
+
+        def _runner() -> Dict[str, Any]:
+            iterations = 0
+            history: List[Dict[str, Any]] = []
+            changed = True
+            while changed and iterations < self._max_iterations:
+                iterations += 1
+                changed = False
+                iteration_payload: Dict[str, Any] = {"iteration": iterations, "results": []}
+                for processor in self._post_processors:
+                    result = processor(self._context)
+                    iteration_payload["results"].append(result)
+                    changed = changed or bool(result.get("changed"))
+                history.append(iteration_payload)
+                if not changed:
+                    break
+            return {
+                "iterations": iterations,
+                "history": history,
+                "converged": not changed,
+            }
+
+        payload = self._run_with_observability(
+            self.POST_PROCESSING_PHASE,
+            _runner,
+            metrics_builder=lambda result: {
+                "iterations": result.get("iterations", 0),
+                "converged": result.get("converged", True),
+            },
+            observability_phase="S3",
         )
-        payload = {"iterations": iterations, "history": history}
         self._context.record(self.POST_PROCESSING_PHASE, payload)
         self._manifest.aggregate_statistics(
             self.POST_PROCESSING_PHASE,
-            {"iterations": iterations, "converged": not changed},
+            {"iterations": payload.get("iterations", 0), "converged": payload.get("converged", True)},
         )
         self._checkpoint_manager.save_phase_checkpoint(self.POST_PROCESSING_PHASE, payload)
         return payload
 
     def resume_management(self) -> Dict[str, Any]:
         handler = self._resume_handler
-        payload = {"supported": bool(handler)}
-        start = perf_counter()
-        if handler:
-            _LOGGER.info("Executing resume handler phase")
-            payload = handler(self._context)
-        self._observability.record_performance(
-            phase=self.RESUME_PHASE,
-            metrics={"elapsed_seconds": perf_counter() - start},
+        _LOGGER.info("Executing resume management phase", supported=bool(handler))
+
+        def _runner() -> Dict[str, Any]:
+            if handler is None:
+                return {"supported": False}
+            return handler(self._context)
+
+        payload = self._run_with_observability(
+            self.RESUME_PHASE,
+            _runner,
+            metrics_builder=lambda result: {"supported": bool(result.get("supported", False))},
         )
         self._context.record(self.RESUME_PHASE, payload)
         self._checkpoint_manager.save_phase_checkpoint(self.RESUME_PHASE, payload)
@@ -160,11 +253,19 @@ class PhaseManager:
 
     def finalize_taxonomy(self) -> Dict[str, Any]:
         _LOGGER.info("Finalising taxonomy")
-        start = perf_counter()
-        payload = self._finalizer(self._context)
-        self._observability.record_performance(
-            phase=self.FINALIZATION_PHASE,
-            metrics={"elapsed_seconds": perf_counter() - start},
+
+        def _runner() -> Dict[str, Any]:
+            return self._finalizer(self._context)
+
+        payload = self._run_with_observability(
+            self.FINALIZATION_PHASE,
+            _runner,
+            metrics_builder=lambda result: {
+                "validation_nodes": len(result.get("validation", {}).get("nodes", []))
+                if isinstance(result.get("validation"), dict)
+                else 0,
+            },
+            observability_phase="Hierarchy",
         )
         self._context.record(self.FINALIZATION_PHASE, payload)
         self._manifest.aggregate_statistics(
@@ -204,6 +305,11 @@ class PhaseManager:
                     skipping = False
                 else:
                     _LOGGER.info("Skipping phase due to resume", phase=phase_name)
+                    self._observability.record_operation(
+                        phase=phase_name,
+                        operation="resume_skip",
+                        payload={"resume_from": resume_from},
+                    )
                     continue
             if phase_name.startswith("phase1_level"):
                 level = int(phase_name[-1])

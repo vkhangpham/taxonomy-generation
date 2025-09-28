@@ -9,8 +9,9 @@ Core Tech
 - Optional run summarizer that samples evidence and compiles per-step reports.
 
 Run Manifest
-- Include: prompt versions, thresholds, seeds, timestamp, input summary stats, counters per step, sampled evidence.
-- Record: retries, quarantined items, rule/validation outcomes, merge/split logs.
+- Observability manifest exports counters, performance, prompt versions, thresholds, seeds, and evidence snapshots via `ObservabilityManifest.build_payload`.
+- Legacy consumers continue to read `evidence_samples`, `operation_logs`, and configuration sections that are hydrated from the observability snapshot for backward compatibility.
+- Deterministic checksums are generated for both the overall manifest and the observability payload.
 
 Counters (minimum set)
 - S0: pages_seen, pages_failed, blocks_total, blocks_kept, by_language
@@ -28,6 +29,22 @@ Determinism
 
 Failure Isolation
 - Quarantine artifacts with explicit reasons; batch proceeds even with partial failures.
+
+Phase Manager Integration
+- Each orchestration phase executes inside an observability phase context; start, completion, and failure events are logged automatically.
+- Level generators surface S1 counters; consolidation maps into S2 metrics; post-processing emits S3 checks; finalisation records hierarchy summaries.
+- Resume skips create explicit `resume_skip` operation entries to preserve audit trails when resuming a run.
+
+S1 Extraction Integration
+- `ExtractionProcessor` now routes all metrics through the shared `ObservabilityContext` while keeping a compatibility snapshot for legacy tests.
+- Evidence sampling captures representative successes and failures; provider errors and invalid payloads are quarantined with structured payloads.
+- Metadata generation prefers observability snapshots (counters, quarantine totals, provider error counts) ensuring JSON artifacts mirror the canonical registry.
+- Performance metrics are reported per batch to enable throughput monitoring without bespoke timers in callers.
+
+Testing & Tooling
+- Unit tests cover counter registry invariants, ObservabilityContext behaviour, PhaseManager orchestration, and S1 pipeline integrations with success and failure scenarios.
+- New test suites validate deterministic snapshots, evidence sampling, quarantine reporting, and manifest export structure.
+- Use pytest fixtures with temporary checkpoints to verify resume state without polluting working directories.
 
 Acceptance Tests
 - Two runs with identical inputs and seeds yield identical outputs and manifests.
