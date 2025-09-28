@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import itertools
+import threading
+from time import perf_counter
 from dataclasses import dataclass, field
 from typing import Dict, Iterable, List, Sequence
 
@@ -40,7 +42,14 @@ class DeduplicationResult:
 
 
 class DeduplicationProcessor:
-    """Coordinator for the deduplication pipeline."""
+    """Coordinator for the deduplication pipeline.
+
+    The processor retains only the last occurrence when duplicate concept IDs are
+    provided while logging the conflict and exposing aggregate duplicate metrics
+    with the result. Calls to :meth:`process` are serialized with an internal
+    threading lock so a single processor instance can be reused safely across
+    threads without additional coordination.
+    """
 
     def __init__(self, policy: DeduplicationPolicy) -> None:
         self.policy = policy
@@ -53,6 +62,7 @@ class DeduplicationProcessor:
         self.scorer = SimilarityScorer(policy)
         self.graph = SimilarityGraph()
         self.merger = ConceptMerger(policy)
+        self._lock = threading.Lock()
 
     def _reset_run_state(self) -> None:
         """Clear per-run state so repeated calls start fresh."""
@@ -161,51 +171,103 @@ class DeduplicationProcessor:
         return deduped, merge_ops, samples
 
     def process(self, concepts: Sequence[Concept]) -> DeduplicationResult:
-        self._reset_run_state()
-        concept_lookup = {concept.id: concept for concept in concepts}
-        for concept_id in concept_lookup:
-            self.graph.add_node(concept_id)
+        """Run the deduplication pipeline for the provided concepts.
 
-        blocking_output = self._build_blocks(concepts)
-        stats: Dict[str, object] = {
-            "blocking": {
-                "strategy_counts": blocking_output.metrics.strategy_counts,
-                "total_blocks": blocking_output.metrics.total_blocks,
-                "average_block_size": blocking_output.metrics.average_block_size,
-                "max_block_size": blocking_output.metrics.max_block_size,
+        Duplicate concept IDs are detected before processing. The processor keeps
+        the last occurrence to match downstream expectations and logs the
+        conflict so the caller can address the source data. Metrics for duplicate
+        detection, total pair comparisons, and elapsed time are returned in the
+        result stats.
+        """
+
+        with self._lock:
+            start_time = perf_counter()
+            total_concepts = len(concepts)
+            _LOGGER.info("Deduplication run started", total_concepts=total_concepts)
+
+            self._reset_run_state()
+            concept_lookup: Dict[str, Concept] = {}
+            occurrence_counts: Dict[str, int] = {}
+            for concept in concepts:
+                concept_lookup[concept.id] = concept
+                occurrence_counts[concept.id] = occurrence_counts.get(concept.id, 0) + 1
+
+            duplicate_ids = {cid: count for cid, count in occurrence_counts.items() if count > 1}
+            duplicates_detected = sum(count - 1 for count in duplicate_ids.values())
+            unique_concepts = list(concept_lookup.values())
+            unique_count = len(unique_concepts)
+
+            if duplicate_ids:
+                sample = list(duplicate_ids.items())[:5]
+                _LOGGER.warning(
+                    "Duplicate concept ids detected; keeping last occurrence",
+                    total_duplicates=duplicates_detected,
+                    duplicate_id_count=len(duplicate_ids),
+                    sample=sample,
+                )
+
+            for concept_id in concept_lookup:
+                self.graph.add_node(concept_id)
+
+            blocking_output = self._build_blocks(unique_concepts)
+            stats: Dict[str, object] = {
+                "input": {
+                    "total_concepts": total_concepts,
+                    "unique_concepts": unique_count,
+                    "duplicate_id_count": len(duplicate_ids),
+                    "duplicates_discarded": duplicates_detected,
+                },
+                "duplicates_detected": duplicates_detected,
+                "blocking": {
+                    "strategy_counts": blocking_output.metrics.strategy_counts,
+                    "total_blocks": blocking_output.metrics.total_blocks,
+                    "average_block_size": blocking_output.metrics.average_block_size,
+                    "max_block_size": blocking_output.metrics.max_block_size,
+                },
             }
-        }
 
-        for block_id, members in blocking_output.blocks.items():
-            if len(members) < 2:
-                continue
-            self._compare_block(block_id, members, stats)
+            for block_id, members in blocking_output.blocks.items():
+                if len(members) < 2:
+                    continue
+                self._compare_block(block_id, members, stats)
 
-        components = [
-            component
-            for component in self.graph.connected_components()
-            if len(component) > 1
-        ]
-        stats["graph"] = self.graph.stats()
-        stats["components_with_edges"] = len(components)
+            components = [
+                component
+                for component in self.graph.connected_components()
+                if len(component) > 1
+            ]
+            stats["graph"] = self.graph.stats()
+            stats["components_with_edges"] = len(components)
 
-        deduped_concepts, merge_ops, samples = self._merge_components(
-            components,
-            concept_lookup,
-            stats,
-        )
+            deduped_concepts, merge_ops, samples = self._merge_components(
+                components,
+                concept_lookup,
+                stats,
+            )
 
-        result = DeduplicationResult(
-            concepts=deduped_concepts,
-            merge_ops=merge_ops,
-            stats=stats,
-            samples=samples,
-        )
-        _LOGGER.info(
-            "Deduplication complete",
-            merges=len(merge_ops),
-            remaining=len(deduped_concepts),
-        )
-        return result
+            total_pairs = stats.get("pairs_compared", 0)
+            stats["total_pairs_compared"] = total_pairs
+            elapsed_seconds = perf_counter() - start_time
+            stats["timing"] = {"elapsed_seconds": elapsed_seconds}
+
+            result = DeduplicationResult(
+                concepts=deduped_concepts,
+                merge_ops=merge_ops,
+                stats=stats,
+                samples=samples,
+            )
+            _LOGGER.info(
+                "Deduplication run finished",
+                total_concepts=total_concepts,
+                unique_concepts=unique_count,
+                duplicate_id_count=len(duplicate_ids),
+                duplicates_discarded=duplicates_detected,
+                total_blocks=blocking_output.metrics.total_blocks,
+                merges=len(merge_ops),
+                remaining=len(deduped_concepts),
+                total_pairs_compared=total_pairs,
+                elapsed_seconds=elapsed_seconds,
+            )
+            return result
 
 __all__ = ["DeduplicationProcessor", "DeduplicationResult"]
