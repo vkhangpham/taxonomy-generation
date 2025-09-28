@@ -370,7 +370,11 @@ class ObservabilitySettings(BaseModel):
 
 
 class ObservabilityPolicy(BaseModel):
-    """Global observability controls for the taxonomy pipeline."""
+    """Global observability controls for the taxonomy pipeline.
+
+    When ``audit_trail_generation`` is enabled an audit file is written using the
+    redaction keys configured via ``redact_observability_fields``.
+    """
 
     counter_registry_enabled: bool = Field(default=True)
     evidence_sampling_rate: float = Field(default=0.1, ge=0.0, le=1.0)
@@ -379,6 +383,10 @@ class ObservabilityPolicy(BaseModel):
     deterministic_sampling_seed: int = Field(default=42)
     performance_tracking_enabled: bool = Field(default=True)
     audit_trail_generation: bool = Field(default=True)
+    fail_fast_observability: bool = Field(default=False)
+    redact_observability_fields: tuple[str, ...] = Field(
+        default=("authorization", "api_key", "apiKey", "secret", "token", "password"),
+    )
     manifest_checksum_validation: bool = Field(default=True)
     max_operation_log_entries: int = Field(default=5000, ge=1)
     max_quarantine_items: int | None = Field(default=None, ge=1)

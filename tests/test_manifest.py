@@ -112,3 +112,41 @@ def test_finalize_skips_observability_when_disabled(tmp_path) -> None:
     assert result["configuration"]["seeds"] == {"baseline": 1}
     assert all(entry["kind"] != "observability" for entry in result["artifacts"])
     assert not list(Path(tmp_path).glob("*.observability.json"))
+
+
+def test_collect_prompt_versions_prefers_manifest() -> None:
+    manifest = RunManifest("run")
+    manifest._observability = mock.Mock()
+    registry = mock.Mock()
+    payload = {"prompt-A": "v1"}
+    fake_manifest = mock.Mock()
+    fake_manifest.collect_prompt_versions.return_value = payload
+
+    with mock.patch.object(manifest, "_ensure_observability_manifest", return_value=fake_manifest):
+        manifest.collect_prompt_versions(registry)
+
+    fake_manifest.collect_prompt_versions.assert_called_once_with(
+        registry,
+        prompt_keys=None,
+    )
+    manifest._observability.register_prompt_version.assert_called_once_with("prompt-A", "v1")
+    assert manifest._data["prompt_versions"]["prompt-A"] == "v1"
+
+
+def test_collect_prompt_versions_uses_registry_fallback() -> None:
+    manifest = RunManifest("run")
+    manifest._observability = mock.Mock()
+    registry = mock.Mock()
+    registry.active_version.side_effect = lambda key: {"prompt-A": "v1", "prompt-B": "v2"}[key]
+
+    with mock.patch.object(manifest, "_ensure_observability_manifest", return_value=None), mock.patch.object(
+        manifest,
+        "_resolve_prompt_keys",
+        return_value=["prompt-A", "prompt-B"],
+    ):
+        manifest.collect_prompt_versions(registry)
+
+    registry.active_version.assert_any_call("prompt-A")
+    registry.active_version.assert_any_call("prompt-B")
+    assert manifest._observability.register_prompt_version.call_count == 2
+    assert manifest._data["prompt_versions"] == {"prompt-A": "v1", "prompt-B": "v2"}
