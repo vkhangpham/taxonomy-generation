@@ -380,6 +380,8 @@ class ObservabilityPolicy(BaseModel):
     performance_tracking_enabled: bool = Field(default=True)
     audit_trail_generation: bool = Field(default=True)
     manifest_checksum_validation: bool = Field(default=True)
+    max_operation_log_entries: int = Field(default=5000, ge=1)
+    max_quarantine_items: int | None = Field(default=None, ge=1)
 
     @model_validator(mode="after")
     def _validate_sampling(self) -> "ObservabilityPolicy":

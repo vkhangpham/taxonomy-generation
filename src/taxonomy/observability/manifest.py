@@ -167,6 +167,7 @@ class ObservabilityManifest:
             "thresholds": thresholds,
             "seeds": seeds,
             "checksum": snapshot.checksum,
+            "captured_at": snapshot.captured_at,
         }
 
 
