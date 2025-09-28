@@ -59,6 +59,21 @@ class Pipeline:
                     continue
 
             logger.info("Executing pipeline step", pipeline=self.name, step=step.name)
+            checkpoint_id = f"pipeline::{step.name}"
+
+            if self.checkpoint_manager:
+                try:
+                    self.checkpoint_manager.save_phase_checkpoint(
+                        checkpoint_id, {"status": "started"}
+                    )
+                except Exception:  # pragma: no cover - logging only path
+                    logger.exception(
+                        "Failed to save pipeline checkpoint",
+                        pipeline=self.name,
+                        step=step.name,
+                        checkpoint_status="started",
+                    )
+
             try:
                 step.run()
             except Exception as exc:  # pragma: no cover - propagation path
@@ -69,9 +84,17 @@ class Pipeline:
 
             self.completed_steps.append(step.name)
             if self.checkpoint_manager:
-                self.checkpoint_manager.save_phase_checkpoint(
-                    f"pipeline::{step.name}", {"status": "completed"}
-                )
+                try:
+                    self.checkpoint_manager.save_phase_checkpoint(
+                        checkpoint_id, {"status": "completed"}
+                    )
+                except Exception:  # pragma: no cover - logging only path
+                    logger.exception(
+                        "Failed to save pipeline checkpoint",
+                        pipeline=self.name,
+                        step=step.name,
+                        checkpoint_status="completed",
+                    )
 
     def add_step(self, step: PipelineStep) -> None:
         self._ensure_steps_index()
