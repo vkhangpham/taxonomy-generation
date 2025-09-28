@@ -53,15 +53,35 @@ class InstitutionResolver:
     def resolve_identity(self, institution_name: str) -> str:
         """Return the canonical institution identifier for *institution_name*."""
 
-        trimmed_name = institution_name.strip() if institution_name else ""
+        if institution_name is None:
+            trimmed_name = ""
+        elif isinstance(institution_name, str):
+            trimmed_name = institution_name.strip()
+        else:
+            coerced_name = str(institution_name)
+            logger.debug(
+                "Coercing non-string institution name to string; coerced={}",
+                coerced_name,
+            )
+            trimmed_name = coerced_name.strip()
 
         if not trimmed_name:
             placeholder = self._placeholder_identifier("unknown", suffix="empty")
-            logger.debug("Missing institution name encountered", placeholder=placeholder)
+            logger.debug(
+                "Missing institution name encountered; placeholder={}", placeholder
+            )
             return placeholder
 
-        if trimmed_name.lower() == "unknown":
-            return "placeholder::unknown"
+        lowered_name = trimmed_name.lower()
+
+        if lowered_name == "unknown":
+            placeholder = self._placeholder_identifier("unknown", suffix="explicit")
+            logger.debug(
+                "Explicit 'unknown' institution name encountered; placeholder={}",
+                placeholder,
+            )
+            self._cache.setdefault(lowered_name, placeholder)
+            return placeholder
 
         key = self._normalize_key(trimmed_name)
         if key in self._cache:
@@ -86,8 +106,9 @@ class InstitutionResolver:
                 base = cleaned.split(",", 1)[0].strip()
                 if base:
                     return _canonicalize_case(base)
-            if " at " in lowered:
-                base = cleaned.split(" at ", 1)[0].strip()
+            at_index = lowered.find(" at ")
+            if at_index != -1:
+                base = cleaned[:at_index].strip()
                 if base:
                     return _canonicalize_case(base)
         if self.policy.campus_vs_system == "prefer-campus":
