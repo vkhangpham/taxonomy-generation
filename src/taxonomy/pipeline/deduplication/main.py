@@ -36,14 +36,25 @@ def deduplicate_concepts(
     policy = cfg.policies.deduplication
     processor = DeduplicationProcessor(policy)
 
-    def _normalize_destination(raw: str | Path) -> str | Path:
-        """Expand local paths and ensure their parent directory exists."""
+    def _normalize_input_path(raw: str | Path | None) -> str | Path | None:
+        """Coerce ``raw`` into a ``Path`` when it represents a local location."""
+
+        if raw is None:
+            return None
+        if isinstance(raw, Path):
+            return raw
+        if is_remote_path(raw):
+            return raw
+        return Path(raw)
+
+    def _canonicalize_output(raw: str | Path) -> str | Path:
+        """Expand user paths and resolve local outputs to absolute ``Path`` objects."""
 
         if is_remote_path(raw):
             return str(raw)
-        path = Path(raw).expanduser()
-        path.parent.mkdir(parents=True, exist_ok=True)
-        return path
+        path = raw if isinstance(raw, Path) else Path(raw)
+        path = path.expanduser()
+        return path.resolve()
 
     def _swap_suffix(raw: str | Path, new_suffix: str) -> str | Path:
         """Replace the suffix for local paths while preserving remotes."""
@@ -55,7 +66,47 @@ def deduplicate_concepts(
             if dot_index > slash_index:
                 return raw_str[:dot_index] + new_suffix
             return raw_str + new_suffix
-        return Path(raw).with_suffix(new_suffix)
+        path = raw if isinstance(raw, Path) else Path(raw)
+        return path.with_suffix(new_suffix)
+
+    def _ensure_local_directory(target: str | Path, label: str) -> None:
+        """Ensure the parent directory for *target* exists when it is local."""
+
+        if not isinstance(target, Path):
+            return
+        try:
+            target.parent.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            _LOGGER.exception(
+                "Failed to create output directory",
+                target=label,
+                destination=str(target),
+                error=str(exc),
+            )
+            raise
+
+    def _cleanup_outputs(paths: list[tuple[str | Path, str]]) -> None:
+        """Remove partially written outputs when a downstream step fails."""
+
+        for output_path, label in paths:
+            if is_remote_path(output_path):
+                continue
+            try:
+                Path(output_path).unlink()
+            except FileNotFoundError:
+                continue
+            except OSError as cleanup_err:
+                _LOGGER.warning(
+                    "Failed to clean up output after error",
+                    target=label,
+                    destination=str(output_path),
+                    error=str(cleanup_err),
+                )
+
+    concepts_path = _normalize_input_path(concepts_path)
+    output_path = _normalize_input_path(output_path)
+    merge_ops_path = _normalize_input_path(merge_ops_path)
+    metadata_path = _normalize_input_path(metadata_path)
 
     concept_stream = load_concepts(concepts_path, level_filter=level_filter)
 
@@ -70,36 +121,78 @@ def deduplicate_concepts(
         level_filter=level_filter,
     )
 
-    output_destination = _normalize_destination(output_path)
+    output_destination = _canonicalize_output(output_path)
     merge_target = merge_ops_path or _swap_suffix(output_destination, ".merge_ops.jsonl")
-    merge_destination_target = _normalize_destination(merge_target)
+    merge_destination_target = _canonicalize_output(merge_target)
     metadata_target_raw = metadata_path or _swap_suffix(output_destination, ".metadata.json")
-    metadata_target = _normalize_destination(metadata_target_raw)
+    metadata_target = _canonicalize_output(metadata_target_raw)
 
-    destination = write_deduplicated_concepts(result.concepts, output_destination)
-    merge_destination = write_merge_operations(result.merge_ops, merge_destination_target)
+    try:
+        _ensure_local_directory(output_destination, "deduplicated concepts")
+        _ensure_local_directory(merge_destination_target, "merge operations")
+        _ensure_local_directory(metadata_target, "metadata")
+    except OSError:
+        return
 
+    written_outputs: list[tuple[str | Path, str]] = []
+
+    try:
+        destination = write_deduplicated_concepts(result.concepts, output_destination)
+        written_outputs.append((destination, "deduplicated concepts"))
+    except OSError as exc:
+        _LOGGER.exception(
+            "Failed to write deduplicated concepts",
+            destination=str(output_destination),
+            error=str(exc),
+        )
+        return
+
+    try:
+        merge_destination = write_merge_operations(result.merge_ops, merge_destination_target)
+        written_outputs.append((merge_destination, "merge operations"))
+    except OSError as exc:
+        _LOGGER.exception(
+            "Failed to write merge operations",
+            destination=str(merge_destination_target),
+            error=str(exc),
+        )
+        _cleanup_outputs(written_outputs)
+        return
+
+    policy_snapshot = policy.model_dump(mode="json")
     config_snapshot = {
-        "policy_version": cfg.policies.policy_version,
-        "merge_policy": policy.merge_policy,
-        "thresholds": policy.thresholds.model_dump(mode="json"),
+        "policy_version": str(cfg.policies.policy_version),
+        "merge_policy": policy_snapshot.get("merge_policy"),
+        "thresholds": policy_snapshot.get("thresholds", {}),
         "weights": {
-            "jaro_winkler_weight": policy.jaro_winkler_weight,
-            "jaccard_weight": policy.jaccard_weight,
-            "abbrev_score_weight": policy.abbrev_score_weight,
+            "jaro_winkler_weight": policy_snapshot.get("jaro_winkler_weight"),
+            "jaccard_weight": policy_snapshot.get("jaccard_weight"),
+            "abbrev_score_weight": policy_snapshot.get("abbrev_score_weight"),
         },
         "blocking": {
-            "prefix_length": policy.prefix_length,
-            "phonetic_enabled": policy.phonetic_enabled,
-            "acronym_blocking_enabled": policy.acronym_blocking_enabled,
+            "prefix_length": policy_snapshot.get("prefix_length"),
+            "phonetic_enabled": policy_snapshot.get("phonetic_enabled"),
+            "acronym_blocking_enabled": policy_snapshot.get("acronym_blocking_enabled"),
         },
     }
+
     metadata_payload = generate_dedup_metadata(
         result.stats,
         config_snapshot,
         result.samples,
     )
-    metadata_destination = write_metadata(metadata_payload, metadata_target)
+
+    try:
+        metadata_destination = write_metadata(metadata_payload, metadata_target)
+        written_outputs.append((metadata_destination, "metadata"))
+    except OSError as exc:
+        _LOGGER.exception(
+            "Failed to write metadata",
+            destination=str(metadata_target),
+            error=str(exc),
+        )
+        _cleanup_outputs(written_outputs)
+        return
 
     _LOGGER.info(
         "Deduplication outputs written",
@@ -110,11 +203,11 @@ def deduplicate_concepts(
 
 
 def _build_parser() -> argparse.ArgumentParser:
-    """Build the argument parser for the deduplication CLI.
+    """Build and return the argument parser for the deduplication CLI.
 
-    The parser expects positional paths for `concepts` and `output` along with
-    optional `--merge-ops`, `--metadata`, and `--level` flags to control run
-    destinations and filtering.
+    The parser accepts positional paths for the input concepts JSONL and the
+    deduplicated output, alongside optional flags that configure the merge
+    operations file, metadata destination, and level filter (0-3).
     """
 
     parser = argparse.ArgumentParser(description="Run the concept deduplication pipeline.")
@@ -122,7 +215,14 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("output", help="Destination JSONL for deduplicated concepts")
     parser.add_argument("--merge-ops", dest="merge_ops", help="Optional path for merge operations JSONL")
     parser.add_argument("--metadata", dest="metadata", help="Optional metadata JSON file")
-    parser.add_argument("--level", dest="level", type=int, help="Optional level filter (0-3)")
+    parser.add_argument(
+        "--level",
+        dest="level",
+        type=int,
+        choices=[0, 1, 2, 3],
+        default=None,
+        help="Optional level filter (must be 0, 1, 2, or 3)",
+    )
     return parser
 
 
