@@ -161,10 +161,12 @@ class DisambiguationProcessor:
             }
             split_decision = self._splitter.split(
                 candidate.concepts[0],
+                candidate.concepts,
                 llm_result.senses,
                 parent_mappings,
                 evidence_mapping,
                 split_confidence,
+                group_contexts,
             )
 
             removed_ids = {concept.id for concept in candidate.concepts}
