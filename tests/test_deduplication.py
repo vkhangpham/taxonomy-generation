@@ -135,18 +135,31 @@ def test_acronym_blocker_limits_aliases_and_splits_blocks() -> None:
 
     concepts = [primary, *expansions]
 
-    blocks = blocker.build_blocks(concepts)
-    acronym_blocks = {key: members for key, members in blocks.items() if key.startswith("acronym:AB")}
+    blocks_raw = blocker.build_blocks(concepts)
+    blocks_map = getattr(blocks_raw, "blocks", blocks_raw)
+
+    # Blocks should group concepts by acronym-derived aliases within policy limits.
+    acronym_blocks = {
+        key: members
+        for key, members in blocks_map.items()
+        if key.lower().startswith("acronym:")
+    }
 
     assert acronym_blocks, "expected acronym-driven blocks to be produced"
-    assert len(acronym_blocks) == 2
-    unique_ids_per_block = [{concept.id for concept in members} for members in acronym_blocks.values()]
-    for ids, members in zip(unique_ids_per_block, acronym_blocks.values()):
-        assert len(ids) == len(members) <= policy.max_block_size
+    assert len(acronym_blocks) == 2, "expected two acronym-driven blocks when enforcing policy limits"
 
     observed_ids: set[str] = set()
-    for ids in unique_ids_per_block:
-        observed_ids.update(ids)
+    for block_key, members in acronym_blocks.items():
+        unique_ids = {concept.id for concept in members}
+        assert len(unique_ids) == len(members), (
+            f"block {block_key} contains {len(members)} members but only "
+            f"{len(unique_ids)} unique concept ids"
+        )
+        assert len(members) <= policy.max_block_size, (
+            f"block {block_key} has size {len(members)} exceeding policy max "
+            f"{policy.max_block_size}"
+        )
+        observed_ids.update(unique_ids)
 
     expected_ids = {concept.id for concept in concepts}
     assert observed_ids == expected_ids
