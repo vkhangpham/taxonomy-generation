@@ -182,6 +182,7 @@ policies:
     sample_splits_count: 5
     detailed_logging: false
   validation:
+  validation:
     rules:
       forbidden_patterns:
         - "neurips$"
@@ -223,6 +224,15 @@ policies:
       max_snippets_per_concept: 3
       store_evidence_urls: true
       evidence_sampling_rate: 1.0
+  observability:
+    counter_registry_enabled: true
+    evidence_sampling_rate: 0.1
+    quarantine_logging_enabled: true
+    max_evidence_samples_per_phase: 100
+    deterministic_sampling_seed: 42
+    performance_tracking_enabled: true
+    audit_trail_generation: true
+    manifest_checksum_validation: true
   hierarchy_assembly:
     enforce_acyclicity: true
     enforce_unique_paths: true

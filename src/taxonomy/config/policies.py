@@ -369,6 +369,27 @@ class ObservabilitySettings(BaseModel):
     performance_tracking: bool = True
 
 
+class ObservabilityPolicy(BaseModel):
+    """Global observability controls for the taxonomy pipeline."""
+
+    counter_registry_enabled: bool = Field(default=True)
+    evidence_sampling_rate: float = Field(default=0.1, ge=0.0, le=1.0)
+    quarantine_logging_enabled: bool = Field(default=True)
+    max_evidence_samples_per_phase: int = Field(default=100, ge=1)
+    deterministic_sampling_seed: int = Field(default=42)
+    performance_tracking_enabled: bool = Field(default=True)
+    audit_trail_generation: bool = Field(default=True)
+    manifest_checksum_validation: bool = Field(default=True)
+
+    @model_validator(mode="after")
+    def _validate_sampling(self) -> "ObservabilityPolicy":
+        if self.max_evidence_samples_per_phase <= 0:
+            raise ValueError("max_evidence_samples_per_phase must be positive")
+        if self.deterministic_sampling_seed < 0:
+            raise ValueError("deterministic_sampling_seed must be non-negative")
+        return self
+
+
 class CostTrackingSettings(BaseModel):
     """Cost and quota reporting controls."""
 
@@ -695,6 +716,7 @@ class Policies(BaseModel):
     raw_extraction: RawExtractionPolicy
     level0_excel: LevelZeroExcelPolicy
     validation: ValidationPolicy = Field(default_factory=ValidationPolicy)
+    observability: ObservabilityPolicy = Field(default_factory=ObservabilityPolicy)
     hierarchy_assembly: HierarchyAssemblyPolicy = Field(
         default_factory=HierarchyAssemblyPolicy
     )

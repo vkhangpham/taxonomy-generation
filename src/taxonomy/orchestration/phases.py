@@ -1,11 +1,12 @@
 """Phase orchestration for the end-to-end taxonomy pipeline."""
-
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
+from time import perf_counter
+from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence
 
 from taxonomy.config.settings import Settings
+from taxonomy.observability import ObservabilityContext
 from taxonomy.utils.logging import get_logger
 
 from .checkpoints import CheckpointManager
@@ -23,6 +24,7 @@ class PhaseContext:
 
     settings: Settings
     run_id: str
+    observability: ObservabilityContext
     state: Dict[str, Any] = field(default_factory=dict)
 
     def record(self, phase: str, payload: Dict[str, Any]) -> None:
@@ -30,6 +32,9 @@ class PhaseContext:
 
     def get(self, phase: str, default: Any = None) -> Any:
         return self.state.get(phase, default)
+
+    def phase(self, name: str):
+        return self.observability.phase(name)
 
 
 class PhaseManager:
@@ -62,7 +67,16 @@ class PhaseManager:
         self._post_processors = list(post_processors)
         self._resume_handler = resume_handler
         self._finalizer = finalizer
-        self._context = PhaseContext(settings=settings, run_id=checkpoint_manager.run_id)
+        self._observability = ObservabilityContext(
+            run_id=checkpoint_manager.run_id,
+            policy=settings.policies.observability,
+        )
+        manifest.attach_observability(self._observability)
+        self._context = PhaseContext(
+            settings=settings,
+            run_id=checkpoint_manager.run_id,
+            observability=self._observability,
+        )
         self._max_iterations = max_post_processing_iterations
 
     # ------------------------------------------------------------------
@@ -74,7 +88,11 @@ class PhaseManager:
         if generator is None:
             raise KeyError(f"No level generator registered for level {level}")
         _LOGGER.info("Running level generation", level=level)
+        start = perf_counter()
         payload = generator(self._context, level)
+        self._observability.record_performance(
+            phase=phase_name, metrics={"elapsed_seconds": perf_counter() - start}
+        )
         self._context.record(phase_name, payload)
         self._manifest.aggregate_statistics(phase_name, payload.get("stats", {}))
         self._checkpoint_manager.save_phase_checkpoint(phase_name, payload)
@@ -82,9 +100,16 @@ class PhaseManager:
 
     def consolidate_raw_universe(self) -> Dict[str, Any]:
         _LOGGER.info("Starting consolidation phase")
+        start = perf_counter()
         payload = self._consolidator(self._context)
+        self._observability.record_performance(
+            phase=self.CONSOLIDATION_PHASE,
+            metrics={"elapsed_seconds": perf_counter() - start},
+        )
         self._context.record(self.CONSOLIDATION_PHASE, payload)
-        self._manifest.aggregate_statistics(self.CONSOLIDATION_PHASE, payload.get("stats", {}))
+        self._manifest.aggregate_statistics(
+            self.CONSOLIDATION_PHASE, payload.get("stats", {})
+        )
         self._checkpoint_manager.save_phase_checkpoint(self.CONSOLIDATION_PHASE, payload)
         return payload
 
@@ -93,6 +118,7 @@ class PhaseManager:
         iterations = 0
         history: List[Dict[str, Any]] = []
         changed = True
+        start = perf_counter()
         while changed and iterations < self._max_iterations:
             iterations += 1
             changed = False
@@ -104,6 +130,10 @@ class PhaseManager:
             history.append(iteration_payload)
             if not changed:
                 break
+        self._observability.record_performance(
+            phase=self.POST_PROCESSING_PHASE,
+            metrics={"elapsed_seconds": perf_counter() - start, "iterations": iterations},
+        )
         payload = {"iterations": iterations, "history": history}
         self._context.record(self.POST_PROCESSING_PHASE, payload)
         self._manifest.aggregate_statistics(
@@ -116,16 +146,26 @@ class PhaseManager:
     def resume_management(self) -> Dict[str, Any]:
         handler = self._resume_handler
         payload = {"supported": bool(handler)}
+        start = perf_counter()
         if handler:
             _LOGGER.info("Executing resume handler phase")
             payload = handler(self._context)
+        self._observability.record_performance(
+            phase=self.RESUME_PHASE,
+            metrics={"elapsed_seconds": perf_counter() - start},
+        )
         self._context.record(self.RESUME_PHASE, payload)
         self._checkpoint_manager.save_phase_checkpoint(self.RESUME_PHASE, payload)
         return payload
 
     def finalize_taxonomy(self) -> Dict[str, Any]:
         _LOGGER.info("Finalising taxonomy")
+        start = perf_counter()
         payload = self._finalizer(self._context)
+        self._observability.record_performance(
+            phase=self.FINALIZATION_PHASE,
+            metrics={"elapsed_seconds": perf_counter() - start},
+        )
         self._context.record(self.FINALIZATION_PHASE, payload)
         self._manifest.aggregate_statistics(
             self.FINALIZATION_PHASE, payload.get("stats", {})
@@ -182,5 +222,6 @@ class PhaseManager:
     def context(self) -> PhaseContext:
         return self._context
 
-
-__all__ = ["PhaseManager", "PhaseContext"]
+    @property
+    def observability(self) -> ObservabilityContext:
+        return self._observability
