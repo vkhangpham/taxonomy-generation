@@ -174,13 +174,13 @@ class DisambiguationProcessor:
             candidate, llm_result, split_confidence
         )
         if not should_split:
-            self._mark_deferred_for_concepts(
+            deferred_recorded = self._mark_deferred_for_concepts(
                 failure_reason or llm_result.reason,
                 candidate.concepts,
                 concept_map,
                 candidate_deferred,
             )
-            if candidate_deferred:
+            if deferred_recorded:
                 self.stats["deferred"] += 1
             return candidate_deferred
 
@@ -208,10 +208,10 @@ class DisambiguationProcessor:
                     f"{parents_display} and policy forbids multi-parent "
                     f"exceptions ({conflict_labels[0]} vs {conflict_labels[1]})."
                 )
-                self._mark_deferred_for_concepts(
+                deferred_recorded = self._mark_deferred_for_concepts(
                     reason, candidate.concepts, concept_map, candidate_deferred
                 )
-                if candidate_deferred:
+                if deferred_recorded:
                     self.stats["deferred"] += 1
                 return candidate_deferred
 
@@ -273,13 +273,16 @@ class DisambiguationProcessor:
         concepts: Sequence[Concept],
         concept_map: Dict[str, Concept],
         deferred: List[str],
-    ) -> None:
+    ) -> bool:
+        appended = False
         for concept in concepts:
             tracked_concept = concept_map.get(concept.id)
             if tracked_concept is None:
                 continue
             self._mark_deferred(tracked_concept, reason)
             deferred.append(concept.id)
+            appended = True
+        return appended
 
     def _mark_deferred(self, concept: Concept, reason: str) -> None:
         rationale = concept.rationale
