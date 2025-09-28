@@ -6,13 +6,14 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, Mapping, Optional, TYPE_CHECKING
 
 from taxonomy.observability import ObservabilityContext, stable_hash
-from taxonomy.observability.manifest import ObservabilityManifest
+from taxonomy.utils.helpers import serialize_json
 from taxonomy.utils.logging import get_logger
 
 if TYPE_CHECKING:  # pragma: no cover - typing convenience
     from taxonomy.config.policies import ObservabilityPolicy
     from taxonomy.config.settings import Settings
     from taxonomy.llm.registry import PromptRegistry
+    from taxonomy.observability.manifest import ObservabilityManifest
 
 _LOGGER = get_logger(module=__name__)
 
@@ -118,7 +119,7 @@ class RunManifest:
                     _LOGGER.warning(
                         "Prompt registry accessor %s failed; falling back to other sources",
                         accessor,
-                        exc_info=exc,
+                        exc_info=(type(exc), exc, exc.__traceback__),
                     )
                     continue
                 return sorted({str(key) for key in keys})
@@ -264,7 +265,6 @@ class RunManifest:
             return Path(metadata_dir)
         except TypeError:  # pragma: no cover - defensive guard
             return None
-
     def _integrate_observability(self) -> None:
         if not self._observability:
             return
@@ -280,20 +280,20 @@ class RunManifest:
         metadata_dir = self._metadata_directory()
         if metadata_dir is None:
             _LOGGER.warning(
-                "Metadata directory unavailable; embedding observability payload in run manifest",
+                "Metadata directory unavailable; defaulting to current working directory for observability payload",
                 run_id=self.run_id,
             )
-            self._data["observability"] = exported
-        else:
-            observability_path = serialize_json(
-                exported,
-                metadata_dir / f"{self.run_id}.observability.json",
-            )
-            self._data["observability"] = {
-                "path": str(observability_path),
-                "checksum": stable_hash(exported),
-            }
-            self.add_artifact(observability_path, kind="observability")
+            metadata_dir = Path.cwd()
+
+        observability_path = serialize_json(
+            exported,
+            metadata_dir / f"{self.run_id}.observability.json",
+        )
+        self._data["observability"] = {
+            "path": str(observability_path),
+            "checksum": stable_hash(exported),
+        }
+        self.add_artifact(observability_path, kind="observability")
 
         evidence_samples: list[Dict[str, Any]] = []
         for phase, samples in exported.get("evidence", {}).get("samples", {}).items():
@@ -317,9 +317,9 @@ class RunManifest:
         configuration = self._data.setdefault("configuration", {})
         configuration.setdefault("seeds", {}).update(exported.get("seeds", {}))
 
-        flattened_thresholds = exported.get("thresholds", {})
-        if flattened_thresholds:
-            configuration.setdefault("thresholds_flat", {}).update(flattened_thresholds)
+        thresholds = exported.get("thresholds", {})
+        if thresholds:
+            configuration.setdefault("thresholds", {}).update(thresholds)
 
     def _compute_checksums(self) -> None:
         payload = {key: value for key, value in self._data.items() if key != "checksums"}
