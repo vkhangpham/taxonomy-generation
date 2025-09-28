@@ -93,6 +93,11 @@ class SimilarityScorer:
     def __init__(self, policy: DeduplicationPolicy) -> None:
         self.policy = policy
 
+    def reset(self) -> None:
+        """Reset scorer state between runs."""
+        # No internal caches yet, but keep hook for future optimisations
+        pass
+
     def _threshold_for_pair(self, concept_a: Concept, concept_b: Concept) -> float:
         max_level = max(concept_a.level, concept_b.level)
         if max_level <= 1:

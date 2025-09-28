@@ -33,6 +33,11 @@ class ConceptMerger:
     def __init__(self, policy: DeduplicationPolicy) -> None:
         self.policy = policy
 
+    def reset(self) -> None:
+        """Reset merger state between runs."""
+        # Currently stateless, method retained for interface symmetry
+        pass
+
     @staticmethod
     def _sort_key(concept: Concept) -> Tuple[int, int, str, str]:
         inst_count = concept.support.institutions

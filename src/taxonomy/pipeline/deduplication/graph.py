@@ -73,6 +73,13 @@ class SimilarityGraph:
         self.adjacency: Dict[str, Set[str]] = {}
         self._uf = UnionFind()
 
+    def reset(self) -> None:
+        """Clear nodes, edges, and connectivity for a new run."""
+        self.nodes.clear()
+        self.edges.clear()
+        self.adjacency.clear()
+        self._uf = UnionFind()
+
     def add_node(self, node_id: str) -> None:
         if node_id in self.nodes:
             return

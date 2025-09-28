@@ -54,6 +54,14 @@ class DeduplicationProcessor:
         self.graph = SimilarityGraph()
         self.merger = ConceptMerger(policy)
 
+    def _reset_run_state(self) -> None:
+        """Clear per-run state so repeated calls start fresh."""
+        self.blocker.reset()
+        self.scorer.reset()
+        self.merger.reset()
+        _LOGGER.debug("Resetting SimilarityGraph for new deduplication run")
+        self.graph.reset()
+
     def _pairwise(self, concepts: Sequence[Concept]) -> Iterable[tuple[Concept, Concept]]:
         return itertools.combinations(concepts, 2)
 
@@ -153,8 +161,7 @@ class DeduplicationProcessor:
         return deduped, merge_ops, samples
 
     def process(self, concepts: Sequence[Concept]) -> DeduplicationResult:
-        # Reset graph state so repeated calls do not reuse stale edges/nodes.
-        self.graph = SimilarityGraph()
+        self._reset_run_state()
         concept_lookup = {concept.id: concept for concept in concepts}
         for concept_id in concept_lookup:
             self.graph.add_node(concept_id)

@@ -45,6 +45,11 @@ class BlockingStrategy:
         self.policy = policy
         self.name = name
 
+    def reset(self) -> None:
+        """Clear any cached state before a new run."""
+        # Default no-op so strategies can override when they maintain state
+        pass
+
     def build_blocks(self, concepts: Sequence[Concept]) -> Dict[str, List[Concept]]:
         raise NotImplementedError
 
@@ -157,6 +162,11 @@ class CompositeBlocker:
     def __init__(self, strategies: Sequence[BlockingStrategy], policy: DeduplicationPolicy) -> None:
         self.strategies = list(strategies)
         self.policy = policy
+
+    def reset(self) -> None:
+        """Reset all blocking strategies so no cached state leaks between runs."""
+        for strategy in self.strategies:
+            strategy.reset()
 
     def build_blocks(self, concepts: Sequence[Concept]) -> BlockingOutput:
         merged: Dict[str, List[Concept]] = {}
