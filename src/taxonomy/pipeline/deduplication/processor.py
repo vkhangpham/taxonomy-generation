@@ -18,6 +18,7 @@ from taxonomy.pipeline.deduplication.blocking import (
 from taxonomy.pipeline.deduplication.graph import SimilarityGraph
 from taxonomy.pipeline.deduplication.merger import ConceptMerger, MergeOutcome
 from taxonomy.pipeline.deduplication.similarity import SimilarityScorer
+from taxonomy.utils import jaro_winkler_similarity
 from taxonomy.utils.logging import get_logger
 
 
@@ -66,6 +67,9 @@ class DeduplicationProcessor:
         comparisons = 0
         skipped_parent = 0
         skipped_threshold = 0
+        probe_filtered = 0
+        is_phonetic_block = block_id.startswith("phonetic:")
+        probe_threshold = self.policy.phonetic_probe_threshold if is_phonetic_block else None
         for concept_a, concept_b in self._pairwise(members):
             if comparisons >= self.policy.max_comparisons_per_block:
                 _LOGGER.debug(
@@ -78,6 +82,16 @@ class DeduplicationProcessor:
             if not self.scorer.parent_compatible(concept_a, concept_b):
                 skipped_parent += 1
                 continue
+            if probe_threshold is not None and probe_threshold > 0.0:
+                probe_score = min(
+                    jaro_winkler_similarity(
+                        concept_a.canonical_label, concept_b.canonical_label
+                    ),
+                    1.0,
+                )
+                if probe_score < probe_threshold:
+                    probe_filtered += 1
+                    continue
             decision = self.scorer.score_pair(concept_a, concept_b)
             stats["pairs_compared"] = stats.get("pairs_compared", 0) + 1
             if decision.passed:
@@ -88,8 +102,10 @@ class DeduplicationProcessor:
         stats.setdefault("block_comparisons", {})[block_id] = comparisons
         stats.setdefault("blocked_parent_conflicts", 0)
         stats.setdefault("below_threshold", 0)
+        stats.setdefault("phonetic_probe_filtered", 0)
         stats["blocked_parent_conflicts"] += skipped_parent
         stats["below_threshold"] += skipped_threshold
+        stats["phonetic_probe_filtered"] += probe_filtered
 
     def _merge_components(
         self,

@@ -1,3 +1,4 @@
+import pytest
 from taxonomy.config.policies import DeduplicationPolicy, DeduplicationThresholds
 from taxonomy.entities.core import Concept, SupportStats
 from taxonomy.pipeline.deduplication.blocking import CompositeBlocker, PrefixBlocker
@@ -81,3 +82,51 @@ def test_deduplication_processor_merges_similar_concepts():
     assert merged_winner.support.institutions >= 7
     assert result.stats["graph"]["edges"] >= 1
     assert result.samples, "Expected sampled merges for audit trail"
+
+
+
+def test_similarity_abbrev_uses_aliases() -> None:
+    policy = base_policy()
+    scorer = SimilarityScorer(policy)
+    concept_a = make_concept("c5", "ML Research", aliases=["ML"])
+    concept_b = make_concept("c6", "Machine Learning", aliases=["Machine Learning"])
+
+    decision = scorer.score_pair(concept_a, concept_b)
+
+    assert decision.features.raw["abbrev_score"] == pytest.approx(1.0)
+    assert "jaro_winkler" not in decision.features.raw
+    assert "token_jaccard" not in decision.features.raw
+    assert decision.score == pytest.approx(1.0)
+
+
+def test_similarity_score_capped_and_hint_driver() -> None:
+    policy = base_policy(
+        jaro_winkler_weight=3.0,
+        abbrev_score_weight=5.0,
+        min_similarity_threshold=0.6,
+    )
+    scorer = SimilarityScorer(policy)
+    concept_a = make_concept("c7", "Control Systems")
+    concept_b = make_concept("c8", "Control")
+
+    decision = scorer.score_pair(concept_a, concept_b)
+
+    assert decision.score == pytest.approx(max(decision.features.raw.values()))
+    assert decision.score <= 1.0
+    assert decision.driver == "suffix_prefix_hint"
+    assert "suffix_prefix_hint" in decision.features.weighted
+
+
+def test_phonetic_probe_filters_pairs() -> None:
+    policy = base_policy(phonetic_probe_threshold=0.95)
+    processor = DeduplicationProcessor(policy)
+    concept_a = make_concept("c9", "Alpha")
+    concept_b = make_concept("c10", "Omega")
+    processor.graph.add_node(concept_a.id)
+    processor.graph.add_node(concept_b.id)
+    stats: dict[str, object] = {}
+
+    processor._compare_block("phonetic:test", [concept_a, concept_b], stats)
+
+    assert stats.get("phonetic_probe_filtered", 0) == 1
+    assert stats.get("pairs_compared", 0) == 0

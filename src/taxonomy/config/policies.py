@@ -435,6 +435,12 @@ class DeduplicationPolicy(BaseModel):
         default=True,
         description="Whether Double Metaphone blocking should be applied.",
     )
+    phonetic_probe_threshold: float = Field(
+        default=0.75,
+        ge=0.0,
+        le=1.0,
+        description="Minimum score required from the phonetic probe before full scoring.",
+    )
     acronym_blocking_enabled: bool = Field(
         default=True,
         description="Whether acronym-based blocking should be applied.",
@@ -458,6 +464,10 @@ class DeduplicationPolicy(BaseModel):
         default=1.2,
         ge=0.0,
         description="Weight applied to the acronym/expansion similarity component.",
+    )
+    heuristic_suffixes: List[str] = Field(
+        default_factory=lambda: ["systems", "theory", "engineering"],
+        description="Suffix tokens used by the prefix/suffix heuristic hint.",
     )
     min_similarity_threshold: float = Field(
         default=0.85,

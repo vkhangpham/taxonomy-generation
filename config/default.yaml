@@ -215,11 +215,16 @@ policies:
     merge_policy: conservative
     prefix_length: 6
     phonetic_enabled: true
+    phonetic_probe_threshold: 0.75
     acronym_blocking_enabled: true
     max_block_size: 1000
     jaro_winkler_weight: 1.0
     jaccard_weight: 1.0
     abbrev_score_weight: 1.2
+    heuristic_suffixes:
+      - systems
+      - theory
+      - engineering
     min_similarity_threshold: 0.85
     parent_context_strict: true
     cross_parent_merge_allowed: false

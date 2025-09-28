@@ -15,7 +15,8 @@ Inputs/Outputs (semantic)
 
 Blocking & Similarity
 - Blocking keys: first-k chars of normalized, acronym bucket, phonetic bucket (e.g., Double Metaphone).
-- Similarity score s ∈ [0,1] = max(JaroWinkler, token Jaccard, AbbrevScore(acronym↔expanded)).
+- Similarity score s ∈ [0,1] = max(Jaro–Winkler, token Jaccard, AbbrevScore across canonical labels + a capped alias sample); suffix/prefix hints influence driver selection only.
+- Early stopping: probe AbbrevScore first, then Jaro–Winkler; short-circuit when either meets the merge threshold before falling back to token Jaccard.
 - Thresholds: τ(L0,L1)=0.93, τ(L2,L3)=0.90 (tuneable).
 
 Merge Policy (deterministic)
@@ -30,15 +31,15 @@ Operations
 Edge Generation Techniques
 - String similarity edge: add edge(i,j) if max(JW, Jaccard) ≥ τ(level).
 - Abbreviation edge: add i↔j if acronym(normalized_i)==normalized_j or vice versa (e.g., CS ↔ computer science).
-- Phonetic bucket edge: within same phonetic bucket, add edges for pairs exceeding a lower probe threshold, then re-score.
-- Prefix/suffix heuristic edge: treat common academic suffixes (e.g., "systems", "theory") with partial-overlap boosts.
+- Phonetic bucket edge: within the same phonetic bucket, apply a Jaro–Winkler probe (policy.\`phonetic_probe_threshold\`) before running full scoring.
+- Prefix/suffix heuristic edge: use `heuristic_suffixes` (e.g., "systems", "theory", "engineering") to provide driver hints without overriding the raw score.
 - Parent-context guard: do not add cross-parent edges when parent contexts are incompatible unless verified by evidence.
 
 Failure Handling
 - In conflicting metadata (parents differ), prefer parent with higher support; otherwise flag for disambiguation instead of merge.
 
 Observability
-- Counters: pairs_compared, edges_kept, components, merges_applied.
+- Counters: pairs_compared, edges_kept, components, merges_applied, phonetic_probe_filtered.
 - Samples: top-k merges by similarity for manual review.
 
 Acceptance Tests
