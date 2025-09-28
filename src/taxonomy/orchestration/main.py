@@ -6,7 +6,7 @@ import argparse
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, Iterable, Mapping, Optional, Sequence
+from typing import Any, Dict, Iterable, Mapping, Optional, Sequence, Callable
 
 from taxonomy.config.settings import Settings
 from taxonomy.pipeline.hierarchy_assembly import HierarchyAssembler

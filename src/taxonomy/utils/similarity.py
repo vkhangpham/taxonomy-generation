@@ -157,6 +157,25 @@ def token_jaccard_similarity(text1: str, text2: str) -> float:
     return score
 
 
+@lru_cache(maxsize=_JW_CACHE_SIZE)
+def _jaro_similarity_base_cached(text1: str, text2: str) -> float:
+    """Return the base Jaro similarity for a pair of strings."""
+
+    return jellyfish.jaro_similarity(text1, text2)
+
+
+def _winkler_from_components(
+    base_score: float, prefix_length: int, prefix_weight: float
+) -> Tuple[float, float]:
+    """Apply the Winkler prefix boost and return the boosted score and bounded weight."""
+
+    bounded_prefix_weight = max(0.0, min(_PREFIX_WEIGHT_CAP, prefix_weight))
+    boosted = base_score + prefix_length * bounded_prefix_weight * (1.0 - base_score)
+    if boosted > 1.0:
+        boosted = 1.0
+    return boosted, bounded_prefix_weight
+
+
 def _matched_prefix_length(text1: str, text2: str) -> int:
     """Return the matching prefix length capped at _MAX_PREFIX_LENGTH.
 
@@ -182,6 +201,9 @@ def _jaro_winkler_cached(text1: str, text2: str, prefix_weight: float) -> float:
     distance to jellyfish for performance.
     """
 
+    base_score = _jaro_similarity_base_cached(text1, text2)
+    prefix = _matched_prefix_length(text1, text2)
+
     if _JARO_WINKLER_SUPPORTS_PREFIX:
         return jellyfish.jaro_winkler_similarity(text1, text2, prefix_weight=prefix_weight)
 
@@ -192,16 +214,13 @@ def _jaro_winkler_cached(text1: str, text2: str, prefix_weight: float) -> float:
 
     # Reconstruct Winkler boosting using the requested prefix weight while
     # delegating the base Jaro distance to jellyfish for performance.
-    base_score = jellyfish.jaro_similarity(text1, text2)
-    prefix = _matched_prefix_length(text1, text2)
-    capped_weight = min(max(prefix_weight, 0.0), _PREFIX_WEIGHT_CAP)
-    boosted = base_score + prefix * capped_weight * (1.0 - base_score)
-    if boosted > 1.0:
-        boosted = 1.0
+    boosted, bounded_weight = _winkler_from_components(
+        base_score, prefix, prefix_weight
+    )
     _LOGGER.debug(
-        "Applied manual Winkler boost",
+        "Applied manual Winkler boost for cached prefix weight",
         prefix_weight=prefix_weight,
-        capped_weight=capped_weight,
+        bounded_prefix_weight=bounded_weight,
         prefix_length=prefix,
         base_score=base_score,
         boosted_score=boosted,
@@ -227,11 +246,28 @@ def jaro_winkler_similarity(
     bounded_prefix_weight = max(0.0, min(_PREFIX_WEIGHT_CAP, requested_prefix_weight))
     cache_prefix_weight = round(bounded_prefix_weight, 4)  # Stabilize cache keys.
 
-    score = _jaro_winkler_cached(ordered_1, ordered_2, cache_prefix_weight)
+    cached_score = _jaro_winkler_cached(ordered_1, ordered_2, cache_prefix_weight)
+    if cache_prefix_weight == bounded_prefix_weight:
+        score = cached_score
+    else:
+        base_score = _jaro_similarity_base_cached(ordered_1, ordered_2)
+        prefix_length = _matched_prefix_length(ordered_1, ordered_2)
+        score, bounded_weight = _winkler_from_components(
+            base_score, prefix_length, bounded_prefix_weight
+        )
+        _LOGGER.debug(
+            "Applied manual Winkler boost with exact prefix weight",
+            prefix_weight=bounded_weight,
+            prefix_length=prefix_length,
+            base_score=base_score,
+            boosted_score=score,
+        )
+
     _LOGGER.debug(
         "Computed Jaro-Winkler similarity",
         score=score,
         requested_prefix_weight=requested_prefix_weight,
+        bounded_prefix_weight=bounded_prefix_weight,
         cache_prefix_weight=cache_prefix_weight,
     )
     return score

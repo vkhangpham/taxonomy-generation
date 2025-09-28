@@ -32,7 +32,11 @@ class Pipeline:
     completed_steps: List[str] = field(default_factory=list)
 
     def execute(self, *, resume_from: str | None = None) -> None:
+        # Fail-fast if the given resume point doesn’t exist
+        if resume_from is not None and resume_from not in {step.name for step in self.steps}:
+            raise ValueError(f"Unknown resume_from step '{resume_from}'")
         skipping = resume_from is not None
+
         for step in self.steps:
             if skipping:
                 if step.name == resume_from:
@@ -44,6 +48,7 @@ class Pipeline:
                         step=step.name,
                     )
                     continue
+
             logger.info("Executing pipeline step", pipeline=self.name, step=step.name)
             try:
                 step.run()
@@ -52,8 +57,10 @@ class Pipeline:
                 if self.raise_on_error:
                     raise
                 continue
+
             self.completed_steps.append(step.name)
             if self.checkpoint_manager:
+                …
                 self.checkpoint_manager.save_phase_checkpoint(
                     f"pipeline::{step.name}", {"status": "completed"}
                 )

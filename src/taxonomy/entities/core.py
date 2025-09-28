@@ -209,19 +209,28 @@ class Concept(BaseModel):
     def set_validation_passed(self, passed: bool | None, *, gate: str = "validation") -> None:
         """Update validation result and keep rationale in sync with a single source of truth."""
 
-        self.validation_passed = passed
-
-        if self.rationale is None:
-            self.rationale = Rationale()
-
-        rationale = self.rationale
+        # Ensure we have a Rationale to work with
+        rationale = self.rationale or Rationale()
         if rationale.passed_gates is None:
             rationale.passed_gates = {}
+        gate_results = rationale.passed_gates
 
+        # Update or clear the specific gate result
         if passed is None:
-            rationale.passed_gates.pop(gate, None)
+            gate_results.pop(gate, None)
         else:
-            rationale.passed_gates[gate] = passed
+            gate_results[gate] = passed
+
+        # Recompute the overall validation flag based on all gate outcomes
+        if not gate_results:
+            self.validation_passed = None
+        elif all(gate_results.values()):
+            self.validation_passed = True
+        else:
+            self.validation_passed = False
+
+        # Persist any newly created Rationale
+        self.rationale = rationale
 
     def validate_hierarchy(self, parent_concepts: Sequence["Concept"] | None = None) -> None:
         """Validate hierarchy invariants.

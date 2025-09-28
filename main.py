@@ -50,7 +50,13 @@ def _build_parser() -> argparse.ArgumentParser:
     run_parser = subparsers.add_parser("run", help="Run the full taxonomy pipeline")
     run_parser.add_argument("--environment", choices=["development", "testing", "production"], default=None)
     run_parser.add_argument("--resume-phase", default=None)
-    run_parser.add_argument("--override", action="append", default=[], help="Configuration override expressed as dotted.key=value")
+    run_parser.add_argument(
+        "--override",
+        action="append",
+        default=[],
+        type=_parse_override,
+        help="Configuration override expressed as dotted.key=value",
+    )
 
     resume_parser = subparsers.add_parser("resume", help="Resume a run from checkpoints")
     resume_parser.add_argument("run_id")
@@ -63,7 +69,12 @@ def _build_parser() -> argparse.ArgumentParser:
 
     validate_parser = subparsers.add_parser("validate", help="Validate configuration and exit")
     validate_parser.add_argument("--environment", choices=["development", "testing", "production"], default=None)
-    validate_parser.add_argument("--override", action="append", default=[])
+    validate_parser.add_argument(
+        "--override",
+        action="append",
+        default=[],
+        type=_parse_override,
+    )
 
     return parser
 
@@ -73,7 +84,7 @@ def main(argv: Iterable[str] | None = None) -> int:
     args = parser.parse_args(list(argv) if argv is not None else None)
 
     if args.command == "run":
-        overrides = _merge_overrides(_parse_override(item) for item in args.override)
+        overrides = _merge_overrides(args.override)
         if args.environment:
             overrides["environment"] = args.environment
         result = run_taxonomy_pipeline(config_overrides=overrides, resume_from=args.resume_phase)
@@ -109,7 +120,18 @@ def main(argv: Iterable[str] | None = None) -> int:
         return 0
 
     if args.command == "validate":
-        overrides = _merge_overrides(_parse_override(item) for item in args.override)
+        overrides = _merge_overrides(args.override)
+        if args.environment:
+            overrides["environment"] = args.environment
+        Settings(**overrides)
+        _LOGGER.info("Configuration validated successfully")
+        return 0
+        for phase in sorted(manager.base_directory.glob("*.checkpoint.json")):
+            _LOGGER.info("Checkpoint", phase=phase.name)
+        return 0
+
+    if args.command == "validate":
+        overrides = _merge_overrides(args.override)
         if args.environment:
             overrides["environment"] = args.environment
         Settings(**overrides)

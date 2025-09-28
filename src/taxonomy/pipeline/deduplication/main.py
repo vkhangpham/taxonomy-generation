@@ -110,7 +110,10 @@ def deduplicate_concepts(
 
     concept_stream = load_concepts(concepts_path, level_filter=level_filter)
 
-    with logging_context(stage="dedup", level=level_filter or "all"):
+    with logging_context(
+        stage="dedup",
+        level=level_filter if level_filter is not None else "all",
+    ):
         result = processor.process(concept_stream)
 
     stats_input = result.stats.get("input", {})

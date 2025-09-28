@@ -182,8 +182,8 @@ policies:
     sample_splits_count: 5
     detailed_logging: false
   validation:
-  validation:
     rules:
+      forbidden_patterns:
       forbidden_patterns:
         - "neurips$"
         - "icml$"

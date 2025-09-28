@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from typing import Callable, Dict, List, Mapping, Sequence
 
@@ -100,7 +101,17 @@ class LLMDisambiguator:
             error = getattr(response, "error", "unknown error")
             return LLMDisambiguationResult(False, 0.0, [], f"LLM error: {error}")
 
-        parsed = getattr(response, "content", None) or {}
+        raw_content = getattr(response, "content", None)
+        parsed: Mapping[str, object] = {}
+        if isinstance(raw_content, Mapping):
+            parsed = raw_content
+        elif isinstance(raw_content, str):
+            try:
+                candidate = json.loads(raw_content)
+            except (TypeError, ValueError):  # pragma: no cover - defensive
+                candidate = {}
+            if isinstance(candidate, Mapping):
+                parsed = candidate
         senses_payload = parsed.get("senses", []) or []
         confidence_raw = parsed.get("confidence", parsed.get("score", 0.0))
         try:

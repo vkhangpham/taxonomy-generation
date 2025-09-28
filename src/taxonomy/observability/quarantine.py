@@ -93,4 +93,7 @@ class QuarantineManager:
             return len(self._items)
 
     def __repr__(self) -> str:  # pragma: no cover - debugging helper
-        return f"QuarantineManager(total={len(self)}, reasons={self._reason_counts})"
+        with self._lock:
+            total = len(self._items)
+            reasons = dict(self._reason_counts)
+        return f"QuarantineManager(total={total}, reasons={reasons})"

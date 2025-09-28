@@ -11,9 +11,28 @@ from dataclasses import asdict, is_dataclass
 from hashlib import sha256
 import json
 import random
+import re
 from typing import Any, Callable, Iterable, Mapping, TypeVar
 
 _T = TypeVar("_T")
+
+
+_HEX_ADDRESS_RE = re.compile(r"0x[0-9A-Fa-f]+")
+
+
+def _stable_value_key(value: Any) -> tuple[int, str]:
+    """Return a deterministic sort key for *value*.
+
+    Values already converted/frozen should be JSON serialisable, but we fall
+    back to a sanitised ``repr`` when ``json.dumps`` raises ``TypeError``.
+    """
+
+    try:
+        serialised = json.dumps(value, separators=(",", ":"), sort_keys=True)
+    except TypeError:
+        serialised = _HEX_ADDRESS_RE.sub("0x", repr(value))
+        return (1, serialised)
+    return (0, serialised)
 
 
 def _convert(value: Any) -> Any:
@@ -34,8 +53,11 @@ def _convert(value: Any) -> Any:
             (str(key), _convert(val))
             for key, val in sorted(value.items(), key=lambda item: str(item[0]))
         ]
-    if isinstance(value, (list, tuple, set, frozenset)):
+    if isinstance(value, (list, tuple)):
         return [_convert(item) for item in value]
+    if isinstance(value, (set, frozenset)):
+        converted_items = [_convert(item) for item in value]
+        return stable_sorted(converted_items, key=_stable_value_key)
     if isinstance(value, bytes):
         return value.decode("utf-8", errors="replace")
     return value
@@ -90,6 +112,10 @@ def freeze(payload: Any) -> Any:
             (key, freeze(value))
             for key, value in sorted(payload.items(), key=lambda item: str(item[0]))
         )
-    if isinstance(payload, (list, tuple, set, frozenset)):
+    if isinstance(payload, (list, tuple)):
         return tuple(freeze(item) for item in payload)
+    if isinstance(payload, (set, frozenset)):
+        frozen_items = [freeze(item) for item in payload]
+        sorted_items = stable_sorted(frozen_items, key=_stable_value_key)
+        return tuple(sorted_items)
     return payload

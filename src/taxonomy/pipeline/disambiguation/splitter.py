@@ -242,12 +242,14 @@ class ConceptSplitter:
         combined = primary.model_copy(deep=True)
 
         alias_set = {primary.canonical_label.strip(), *primary.aliases}
-        total_records = 0
-        total_institutions = 0
-        total_count = 0
-        rationales: List[Rationale] = []
+        total_records = primary.support.records
+        total_institutions = primary.support.institutions
+        total_count = primary.support.count
+        rationales: List[Rationale] = [primary.rationale]
 
         for concept in concept_group:
+            if concept.id == primary.id:
+                continue
             alias_set.add(concept.canonical_label.strip())
             alias_set.update(alias.strip() for alias in concept.aliases)
             total_records += concept.support.records

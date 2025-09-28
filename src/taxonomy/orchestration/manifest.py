@@ -167,8 +167,15 @@ class RunManifest:
                 sample = dict(entry)
                 sample["phase"] = phase
                 evidence_samples.append(sample)
-        self._data["evidence_samples"] = evidence_samples
-        self._data["operation_logs"] = exported.get("operations", [])
+
+        legacy_samples = list(self._data.get("evidence_samples", []))
+        legacy_samples.extend(evidence_samples)
+        self._data["evidence_samples"] = legacy_samples
+
+        legacy_logs = list(self._data.get("operation_logs", []))
+        legacy_logs.extend(exported.get("operations") or [])
+        self._data["operation_logs"] = legacy_logs
+
         self._data.setdefault("prompt_versions", {}).update(exported.get("prompt_versions", {}))
         self._data.setdefault("configuration", {}).setdefault("seeds", {}).update(
             exported.get("seeds", {})

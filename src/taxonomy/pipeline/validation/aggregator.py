@@ -142,7 +142,11 @@ class ValidationAggregator:
             if scores:
                 web_strength = sum(scores) / len(scores)
 
-        if llm_result is not None and not bool(getattr(llm_result, "unknown", False)):
+        if (
+            llm_result is not None
+            and not bool(getattr(llm_result, "unknown", False))
+            and llm_result.passed
+        ):
             llm_strength = llm_result.confidence
         else:
             llm_strength = 0.0

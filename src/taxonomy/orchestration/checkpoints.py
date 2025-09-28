@@ -72,9 +72,13 @@ class CheckpointManager:
         return checkpoint.get("state")
 
     def cleanup_checkpoints(self, keep_final: bool = True) -> None:
-        for path in self.base_directory.glob("*.checkpoint.json"):
-            if keep_final and path.name.startswith("phase5"):
-                continue
+        checkpoints = sorted(
+            self.base_directory.glob("*.checkpoint.json"),
+            key=lambda candidate: candidate.stat().st_mtime,
+        )
+        if keep_final and checkpoints:
+            checkpoints = checkpoints[:-1]
+        for path in checkpoints:
             path.unlink(missing_ok=True)
         _LOGGER.info("Cleaned up checkpoints", run_id=self.run_id)
 
