@@ -43,6 +43,27 @@ policies:
         - "program in"
     token_minimality_preference: prefer_shortest_unique
     punctuation_handling: strip_terminal
+  single_token:
+    max_tokens_per_level:
+      0: 2
+      1: 2
+      2: 3
+      3: 2
+    forbidden_punctuation:
+      - "-"
+      - "_"
+      - "."
+      - "/"
+      - ":"
+    allowlist:
+      - "computer vision"
+      - "machine learning"
+      - "natural language processing"
+      - "artificial intelligence"
+      - "data science"
+    venue_names_forbidden: true
+    hyphenated_compounds_allowed: false
+    prefer_rule_over_llm: false
   institution_policy:
     campus_vs_system: prefer-campus
     joint_center_handling: duplicate-under-both

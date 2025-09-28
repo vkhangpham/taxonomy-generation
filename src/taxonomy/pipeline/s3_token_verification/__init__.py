@@ -1,4 +1,4 @@
-"""Token-level verification scaffolding for S3."""
+"""Public API for S3 token verification."""
 
 from __future__ import annotations
 
@@ -7,9 +7,25 @@ from typing import Protocol
 
 from loguru import logger
 
+from .io import (
+    VerificationInput,
+    generate_s3_metadata,
+    load_candidates,
+    write_failed_candidates,
+    write_verified_candidates,
+)
+from .main import verify_tokens
+from .processor import (
+    S3Processor,
+    TokenVerificationDecision,
+    TokenVerificationResult,
+)
+from .rules import RuleEvaluation, TokenRuleEngine
+from .verifier import LLMTokenVerifier, LLMVerificationResult
+
 
 class TokenVerifier(Protocol):
-    """Interface implemented by token verification checks."""
+    """Legacy interface preserved for compatibility."""
 
     name: str
 
@@ -19,7 +35,7 @@ class TokenVerifier(Protocol):
 
 @dataclass
 class TokenVerificationSuite:
-    """Coordinator for S3 token verification passes."""
+    """Coordinator for user-defined verifier plugs."""
 
     verifiers: list[TokenVerifier]
 
@@ -29,4 +45,20 @@ class TokenVerificationSuite:
             verifier.verify()
 
 
-__all__ = ["TokenVerifier", "TokenVerificationSuite"]
+__all__ = [
+    "TokenRuleEngine",
+    "RuleEvaluation",
+    "LLMTokenVerifier",
+    "LLMVerificationResult",
+    "S3Processor",
+    "TokenVerificationDecision",
+    "TokenVerificationResult",
+    "VerificationInput",
+    "load_candidates",
+    "write_verified_candidates",
+    "write_failed_candidates",
+    "generate_s3_metadata",
+    "verify_tokens",
+    "TokenVerifier",
+    "TokenVerificationSuite",
+]

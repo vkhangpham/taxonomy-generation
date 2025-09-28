@@ -1,4 +1,4 @@
-"""Frequency filtering utilities for S2."""
+"""Frequency filtering public API."""
 
 from __future__ import annotations
 
@@ -7,9 +7,25 @@ from typing import Protocol
 
 from loguru import logger
 
+from .aggregator import (
+    CandidateAggregator,
+    CandidateEvidence,
+    FrequencyAggregationResult,
+    FrequencyDecision,
+)
+from .institution_resolver import InstitutionResolver
+from .io import (
+    generate_s2_metadata,
+    load_candidates,
+    write_dropped_candidates,
+    write_kept_candidates,
+)
+from .main import filter_by_frequency
+from .processor import S2Processor
+
 
 class FrequencyFilter(Protocol):
-    """Common interface for S2 filters."""
+    """Common interface for legacy S2 filters."""
 
     name: str
 
@@ -29,4 +45,18 @@ class FrequencyFilteringPipeline:
             filter_.apply()
 
 
-__all__ = ["FrequencyFilter", "FrequencyFilteringPipeline"]
+__all__ = [
+    "CandidateAggregator",
+    "CandidateEvidence",
+    "FrequencyAggregationResult",
+    "FrequencyDecision",
+    "InstitutionResolver",
+    "load_candidates",
+    "write_kept_candidates",
+    "write_dropped_candidates",
+    "generate_s2_metadata",
+    "filter_by_frequency",
+    "S2Processor",
+    "FrequencyFilter",
+    "FrequencyFilteringPipeline",
+]

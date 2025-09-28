@@ -67,6 +67,49 @@ class LabelPolicy(BaseModel):
     )
 
 
+class SingleTokenVerificationPolicy(BaseModel):
+    """Deterministic rules for single-token verification in S3."""
+
+    max_tokens_per_level: Dict[int, int] = Field(
+        default_factory=lambda: {0: 2, 1: 2, 2: 3, 3: 2}
+    )
+    forbidden_punctuation: List[str] = Field(
+        default_factory=lambda: ["-", "_", ".", "/", ":"]
+    )
+    allowlist: List[str] = Field(
+        default_factory=lambda: [
+            "computer vision",
+            "machine learning",
+            "natural language processing",
+            "artificial intelligence",
+            "data science",
+        ]
+    )
+    venue_names_forbidden: bool = Field(default=True)
+    hyphenated_compounds_allowed: bool = Field(default=False)
+    prefer_rule_over_llm: bool = Field(default=False)
+
+    @field_validator("max_tokens_per_level")
+    @classmethod
+    def _validate_token_limits(cls, value: Dict[int, int]) -> Dict[int, int]:
+        normalized = {}
+        for level, limit in value.items():
+            if limit <= 0:
+                raise ValueError("max_tokens_per_level values must be positive")
+            normalized[int(level)] = int(limit)
+        return normalized
+
+    @field_validator("allowlist")
+    @classmethod
+    def _normalize_allowlist(cls, value: List[str]) -> List[str]:
+        return [token.strip().lower() for token in value if token.strip()]
+
+    @field_validator("forbidden_punctuation")
+    @classmethod
+    def _normalize_punctuation(cls, value: List[str]) -> List[str]:
+        return [mark.strip() for mark in value if mark.strip()]
+
+
 class InstitutionPolicy(BaseModel):
     """Rules for mapping and reconciling institutional identities."""
 
@@ -317,6 +360,9 @@ class Policies(BaseModel):
     policy_version: str = Field(default="2025-09-27")
     level_thresholds: LevelThresholds
     label_policy: LabelPolicy
+    single_token: SingleTokenVerificationPolicy = Field(
+        default_factory=SingleTokenVerificationPolicy
+    )
     institution_policy: InstitutionPolicy
     web: WebDomainRules
     llm: LLMDeterminismSettings
@@ -370,6 +416,7 @@ __all__ = [
     "LevelThresholds",
     "LevelThreshold",
     "LabelPolicy",
+    "SingleTokenVerificationPolicy",
     "InstitutionPolicy",
     "WebDomainRules",
     "LLMDeterminismSettings",
