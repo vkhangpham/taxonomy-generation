@@ -109,7 +109,7 @@ class DisambiguationProcessor:
 
     def process(
         self,
-        concepts: Sequence[Concept],
+        concepts: Iterable[Concept],
         context_index: ContextIndex | None = None,
     ) -> DisambiguationOutcome:
         self._context_analyzer.reset()

@@ -39,7 +39,7 @@ def disambiguate_concepts(
     settings = settings or Settings()
     policy = settings.policies.disambiguation
 
-    concepts = list(load_concepts(concepts_path))
+    concepts = load_concepts(concepts_path)
     context_data = load_context_data(context_data_path)
 
     processor = DisambiguationProcessor(policy)
@@ -52,7 +52,7 @@ def disambiguate_concepts(
 
     metadata = generate_disambiguation_metadata(
         outcome.stats,
-        policy.model_dump(mode="json"),
+        policy.model_dump(),
         {op.source_id: op.new_ids for op in outcome.split_ops},
     )
     metadata_path = _sibling_with_suffix(output_path, ".metadata.json")
