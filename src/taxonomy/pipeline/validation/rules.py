@@ -31,6 +31,7 @@ class RuleValidator:
         self._compile_patterns()
 
     def validate_concept(self, concept: Concept) -> RuleResult:
+        """Run deterministic rule checks and translate them into findings."""
         violations: List[str] = []
 
         if self._settings.structural_checks_enabled:
@@ -44,10 +45,10 @@ class RuleValidator:
             violations.append(vocab_violation)
 
         hard_violations, soft_violations = self._partition_violations(violations)
-        passed = not hard_violations
-        hard_fail = self._is_hard_failure(hard_violations)
+        hard_fail = bool(hard_violations)
+        passed = not hard_fail
         findings = self._build_findings(concept, hard_violations, soft_violations)
-        summary = self._summarize(violations)
+        summary = self._summarize(hard_violations, soft_violations)
         return RuleResult(
             passed=passed,
             violations=violations,
@@ -82,7 +83,7 @@ class RuleValidator:
         if not required:
             return None
         label = concept.canonical_label.lower()
-        if any(token in label for token in required):
+        if all(token in label for token in required):
             return None
         return f"missing_required_vocab:{concept.level}"
 
@@ -103,7 +104,13 @@ class RuleValidator:
         matches = [pattern.pattern for pattern in self._venue_compiled if pattern.search(label)]
         return [f"venue_name_detected:{match}" for match in matches]
 
-    def _is_hard_failure(self, violations: Sequence[str]) -> bool:
+    def _has_hard_violations(self, violations: Sequence[str]) -> bool:
+        """Return True when hard violations should block the concept.
+
+        Hard violations are deterministic rule breaches that require rejection.
+        Policy-driven thresholds should be implemented at the policy layer rather
+        than in this helper.
+        """
         return bool(violations)
 
     def _build_findings(
@@ -145,14 +152,44 @@ class RuleValidator:
             )
         return findings
 
-    def _summarize(self, violations: Sequence[str]) -> str:
-        if not violations:
+    def _summarize(
+        self,
+        hard_violations: Sequence[str],
+        soft_violations: Sequence[str],
+    ) -> str:
+        """Generate a compact summary for logging and reports."""
+        has_hard = self._has_hard_violations(hard_violations)
+        if not has_hard and not soft_violations:
             return "Rule checks succeeded"
-        return ", ".join(violations)
+
+        counts = []
+        if has_hard:
+            counts.append(f"{len(hard_violations)} hard")
+        if soft_violations:
+            counts.append(f"{len(soft_violations)} soft")
+        headline = ", ".join(counts)
+        primary_issue = hard_violations[0] if has_hard else soft_violations[0]
+        return f"{headline} violations; most significant: {primary_issue}"
+
+    def _venue_violation_is_hard(
+        self, detail: str, forbidden_details: set[str]
+    ) -> bool:
+        """Decide whether a venue-name detection should be treated as hard.
+
+        Venue hits escalate when policy toggles `venue_detection_hard` or when the
+        detected venue already matches a forbidden pattern. More complex rules
+        (e.g., thresholds) should be introduced via the policy layer.
+        """
+        if self._settings.venue_detection_hard:
+            return True
+        if not detail:
+            return False
+        return detail in forbidden_details
 
     def _partition_violations(
         self, violations: Sequence[str]
     ) -> tuple[List[str], List[str]]:
+        """Separate violations into hard and soft buckets."""
         if not violations:
             return [], []
 
@@ -173,10 +210,11 @@ class RuleValidator:
         soft_violations: List[str] = []
         for violation in violations:
             prefix, _, detail = violation.partition(":")
-            is_hard = prefix in hard_prefixes
             if prefix == "venue_name_detected":
-                matches_forbidden = detail in forbidden_details if detail else False
-                is_hard = self._settings.venue_detection_hard or matches_forbidden
+                is_hard = self._venue_violation_is_hard(detail, forbidden_details)
+            else:
+                is_hard = prefix in hard_prefixes
+
             if is_hard:
                 hard_violations.append(violation)
             else:
