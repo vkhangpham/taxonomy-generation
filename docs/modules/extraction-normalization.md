@@ -18,8 +18,8 @@ Inputs/Outputs (semantic)
 Rules & Invariants
 - Determinism: enforce temperature=0.0 (or equivalent) and sorted outputs by normalized label.
 - Strict JSON: prompt must forbid free-form prose; only schema-compliant arrays.
-- Normalization: apply case/punctuation/whitespace/diacritics/acronym policies consistently across levels.
-- Parent anchoring: include best-effort parent references or textual anchors; never hallucinate parents absent evidence.
+- Normalization: apply case/punctuation/whitespace/diacritics/acronym policies consistently across levels; ambiguous acronym expansions (e.g., “AI”) are opt-in via policy and only surface when context supports them.
+- Parent anchoring: include best-effort parent references or textual anchors; never hallucinate parents absent evidence. Anchor resolution normalizes against all shallower levels and, when no stable identifier exists, emits a scoped fallback (`L{level}:{normalized}`) to avoid collisions.
 
 Core Logic
 - Prompt level definition (what belongs at L0/L1/L2/L3) with 1–2 minimal examples per level.
@@ -31,14 +31,14 @@ Normalization Rules (summary)
 - Collapse spaces; normalize hyphens/underscores; strip trailing punctuation.
 - Fold diacritics for comparison; keep original in aliases.
 - Remove boilerplate prefixes at L1 (e.g., “Department of …”), keeping alias.
-- Acronyms: retain both short and expanded forms when unambiguous.
+- Acronyms: retain both short and expanded forms when context confirms the expansion or the level policy allows it; ambiguous short forms are skipped unless explicitly enabled.
 
 Failure Handling
-- If JSON invalid, retry with constrained re-ask (same input, schema reminder); on repeated failure, quarantine record.
+- If JSON invalid, retry with constrained re-ask (same input, schema reminder) and pass a `repair` hint on subsequent attempts; retryable provider errors are re-attempted with exponential backoff until the budget is exhausted. On repeated failure, quarantine record.
 - Drop empty/invalid labels with reason; keep record-level logs for audit.
 
 Observability
-- Counters: records_in, candidates_out, invalid_json, retries, quarantined.
+- Counters: records_in, records_processed_total, candidates_out, invalid_json, provider_errors, retries, quarantined.
 - Drift: track normalized length distribution and alias rates by level.
 
 Acceptance Tests
@@ -58,7 +58,7 @@ Examples
     ```
   - Expected Candidates (sorted by normalized):
     ```json
-    {"level": 1, "label": "Department of Computer Science", "normalized": "computer science", "parents": ["college of engineering"], "aliases": ["dept. of computer science", "cs"], "support": {"institutions": ["u2"], "records": ["r1"]}}
+    {"level": 1, "label": "Department of Computer Science", "normalized": "computer science", "parents": ["L0:college of engineering"], "aliases": ["dept. of computer science", "cs"], "support": {"institutions": ["u2"], "records": ["r1"]}}
     ```
 
 - Example B: Level 2 research areas with diacritics
@@ -73,4 +73,8 @@ Examples
     ```
 
 - Example C: Parent anchoring from context
-  - Given page header "College of Engineering" and section "Departments", extracted L1 candidates include parent anchor "college of engineering"; absent such context, parents remain empty and are resolved later.
+  - Given page header "College of Engineering" and section "Departments", extracted L1 candidates include parent anchor "college of engineering" and resolve to `L0:college of engineering`; absent such context, parents remain empty and are carried forward for later resolution.
+
+CLI Usage
+- `--batch-size` controls how many SourceRecords are processed per extraction chunk.
+- `--resume-from` points to a checkpoint JSON file storing processed record counts and aggregated candidates; when present, the CLI skips completed records and resumes aggregation without reprocessing.

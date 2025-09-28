@@ -25,9 +25,37 @@ def test_detect_acronyms_identifies_uppercase() -> None:
     assert detect_acronyms(text) == ("CS", "EECS")
 
 
-def test_expand_acronym_known_value() -> None:
-    assert expand_acronym("EECS") == "electrical engineering and computer science"
-    assert expand_acronym("XYZ") is None
+def test_expand_acronym_known_value(label_policy: LabelPolicy) -> None:
+    assert (
+        expand_acronym("EECS", level=1, policy=label_policy)
+        == "electrical engineering and computer science"
+    )
+    assert expand_acronym("XYZ", level=1, policy=label_policy) is None
+
+
+def test_expand_acronym_blocks_ambiguous_without_context(label_policy: LabelPolicy) -> None:
+    assert expand_acronym("AI", level=1, policy=label_policy) is None
+    assert (
+        expand_acronym(
+            "AI",
+            level=2,
+            context="Cutting-edge Artificial Intelligence (AI) research",
+            policy=label_policy,
+        )
+        == "artificial intelligence"
+    )
+
+
+def test_expand_acronym_policy_toggle_allows_ambiguous() -> None:
+    policy = LabelPolicy(
+        minimal_canonical_form=MinimalCanonicalForm(),
+        include_ambiguous_acronyms=True,
+    )
+    assert expand_acronym("AI", level=1, policy=policy) == "artificial intelligence"
+
+
+def test_expand_acronym_level_gate(label_policy: LabelPolicy) -> None:
+    assert expand_acronym("EECS", level=2, policy=label_policy) is None
 
 
 def test_generate_aliases_includes_boilerplate_and_acronyms(label_policy: LabelPolicy) -> None:

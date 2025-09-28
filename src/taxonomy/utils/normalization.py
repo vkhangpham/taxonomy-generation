@@ -60,6 +60,8 @@ _COMMON_ACRONYM_MAP: dict[str, str] = {
     "ai": "artificial intelligence",
 }
 
+_AMBIGUOUS_ACRONYMS: frozenset[str] = frozenset({"ai"})
+
 # Acronym detection pattern – we accept two or more consecutive capital letters
 # and allow ampersands to support entries like "R&D".  Trailing punctuation is
 # handled by stripping within :func:`detect_acronyms` to keep the expression
@@ -160,16 +162,40 @@ def detect_acronyms(text: str) -> Tuple[str, ...]:
     return tuple(seen.keys())
 
 
-def expand_acronym(acronym: str, context: str | None = None) -> str | None:
+def expand_acronym(
+    acronym: str,
+    *,
+    level: int,
+    context: str | None = None,
+    policy: LabelPolicy | None = None,
+) -> str | None:
     """Return a conservative expansion for *acronym* when known.
 
     The *context* parameter allows future heuristics (e.g. matching tokens
-    within the surrounding label) but is currently unused; it remains in the
-    signature to avoid breaking changes when we strengthen the implementation.
+    within the surrounding label).  Expansions are limited to shallower levels
+    unless the surrounding context already contains the expanded phrase.  When
+    the acronym is marked ambiguous (e.g. ``AI``), the policy must opt in unless
+    the context explicitly includes the expansion.
     """
 
     key = acronym.lower()
-    return _COMMON_ACRONYM_MAP.get(key)
+    expansion = _COMMON_ACRONYM_MAP.get(key)
+    if not expansion:
+        return None
+
+    normalized_context = (context or "").lower()
+    if expansion.lower() in normalized_context:
+        return expansion
+
+    if key in _AMBIGUOUS_ACRONYMS:
+        allow_ambiguous = bool(getattr(policy, "include_ambiguous_acronyms", False))
+        if not allow_ambiguous:
+            return None
+
+    if level > 1:
+        return None
+
+    return expansion
 
 
 def generate_aliases(
@@ -194,7 +220,12 @@ def generate_aliases(
 
     for acronym in detect_acronyms(original):
         aliases[acronym] = None
-        expansion = expand_acronym(acronym, context=original)
+        expansion = expand_acronym(
+            acronym,
+            level=level,
+            context=original,
+            policy=policy,
+        )
         if expansion:
             aliases[normalize_whitespace(expansion)] = None
 

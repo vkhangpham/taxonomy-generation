@@ -55,6 +55,10 @@ class LabelPolicy(BaseModel):
         default="strip_terminal",
         description="How punctuation should be treated during normalization.",
     )
+    include_ambiguous_acronyms: bool = Field(
+        default=False,
+        description="Whether ambiguous acronym expansions (e.g. AI) should be emitted.",
+    )
 
 
 class InstitutionPolicy(BaseModel):

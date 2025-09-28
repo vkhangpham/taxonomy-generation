@@ -5,17 +5,18 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
-from typing import Iterable, List, Sequence
+from typing import Dict, Iterable, Iterator, List, Sequence, Tuple
 
 from taxonomy.config.settings import Settings
 from taxonomy.entities.core import Candidate, Concept
 from taxonomy.utils.logging import get_logger, logging_context
 
 from .extractor import ExtractionProcessor
-from .io import generate_metadata, load_source_records, write_candidates
+from .io import generate_metadata, load_source_records
 from .normalizer import CandidateNormalizer
 from .parent_index import ParentIndex
-from .processor import S1Processor
+from .processor import AggregatedCandidate, S1Processor
+from taxonomy.utils.helpers import chunked
 
 
 def extract_candidates(
@@ -25,6 +26,8 @@ def extract_candidates(
     previous_parents: Sequence[Candidate | Concept] | None = None,
     output_path: str | Path | None = None,
     metadata_path: str | Path | None = None,
+    resume_from: str | Path | None = None,
+    batch_size: int = 32,
     settings: Settings | None = None,
 ) -> List[Candidate]:
     """High-level API for running the S1 pipeline.
@@ -51,36 +54,149 @@ def extract_candidates(
         parent_index=parent_index,
     )
 
-    previous_parents = previous_parents or []
-    records = list(load_source_records(source_records_path))
+    previous_parents = list(previous_parents or [])
+    if previous_parents:
+        parent_index.build_index(previous_parents)
 
-    with logging_context(stage="s1", level=level, records=len(records)):
-        candidates = processor.process_level(
-            records,
-            level=level,
-            previous_candidates=previous_parents,
-        )
+    total_records = sum(1 for _ in load_source_records(source_records_path))
+    resume_path = Path(resume_from) if resume_from is not None else None
+    processed_records, aggregated_state = _load_resume_checkpoint(resume_path)
+    if processed_records > total_records:
+        processed_records = total_records
+
+    remaining_records = _skip_records(load_source_records(source_records_path), processed_records)
+
+    with logging_context(stage="s1", level=level, records=total_records):
+        for batch in chunked(remaining_records, batch_size):
+            raw = extractor.extract_candidates(batch, level=level)
+            normalized = normalizer.normalize(raw, level=level)
+            aggregated_batch = processor._aggregate(normalized)
+            _merge_aggregated_state(aggregated_state, aggregated_batch)
+            processed_records += len(batch)
+            if resume_path is not None:
+                _write_resume_checkpoint(resume_path, processed_records, aggregated_state)
+
+    candidates = processor._materialize(aggregated_state.values())
 
     if output_path is not None:
-        write_candidates(candidates, output_path)
+        _stream_candidates(candidates, output_path)
         if metadata_path is None:
             metadata_path = Path(output_path).with_suffix(".metadata.json")
         stats = {
             "records_in": extractor.metrics.records_in,
+            "records_processed_total": processed_records,
             "candidates_out": extractor.metrics.candidates_out,
             "invalid_json": extractor.metrics.invalid_json,
             "quarantined": extractor.metrics.quarantined,
             "provider_errors": extractor.metrics.provider_errors,
+            "retries": extractor.metrics.retries,
             "final_candidates": len(candidates),
         }
         config_used = {
             "policy_version": cfg.policies.policy_version,
             "level": level,
+            "batch_size": batch_size,
         }
         metadata = generate_metadata(stats, config_used)
         Path(metadata_path).write_text(json.dumps(metadata, indent=2) + "\n", encoding="utf-8")
 
+    if resume_path is not None:
+        _write_resume_checkpoint(resume_path, processed_records, aggregated_state)
+
     return candidates
+
+
+def _skip_records(records: Iterable, offset: int) -> Iterator:
+    for index, record in enumerate(records):
+        if index < offset:
+            continue
+        yield record
+
+
+def _merge_aggregated_state(
+    target: Dict[Tuple[str, Tuple[str, ...]], AggregatedCandidate],
+    items: Iterable[AggregatedCandidate],
+) -> None:
+    for item in items:
+        key = (item.normalized, item.parents)
+        if key not in target:
+            target[key] = AggregatedCandidate(
+                level=item.level,
+                normalized=item.normalized,
+                parents=item.parents,
+                primary_label=item.primary_label,
+                aliases=set(item.aliases),
+                record_fingerprints=set(item.record_fingerprints),
+                institutions=set(item.institutions),
+                total_count=item.total_count,
+            )
+            continue
+        existing = target[key]
+        existing.aliases.update(item.aliases)
+        existing.record_fingerprints.update(item.record_fingerprints)
+        existing.institutions.update(item.institutions)
+        existing.total_count += item.total_count
+        if not existing.primary_label.strip():
+            existing.primary_label = item.primary_label
+
+
+def _stream_candidates(candidates: Sequence[Candidate], output_path: str | Path) -> Path:
+    path = Path(output_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8") as handle:
+        for candidate in candidates:
+            handle.write(candidate.model_dump_json(sort_keys=True))
+            handle.write("\n")
+    return path.resolve()
+
+
+def _load_resume_checkpoint(
+    path: Path | None,
+) -> Tuple[int, Dict[Tuple[str, Tuple[str, ...]], AggregatedCandidate]]:
+    if path is None or not path.exists():
+        return 0, {}
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    processed = int(payload.get("processed_records", 0))
+    aggregated: Dict[Tuple[str, Tuple[str, ...]], AggregatedCandidate] = {}
+    for entry in payload.get("aggregated", []):
+        parents = tuple(entry.get("parents", []))
+        key = (entry["normalized"], parents)
+        aggregated[key] = AggregatedCandidate(
+            level=int(entry.get("level", 0)),
+            normalized=entry["normalized"],
+            parents=parents,
+            primary_label=entry.get("primary_label", ""),
+            aliases=set(entry.get("aliases", [])),
+            record_fingerprints=set(entry.get("record_fingerprints", [])),
+            institutions=set(entry.get("institutions", [])),
+            total_count=int(entry.get("total_count", 0)),
+        )
+    return processed, aggregated
+
+
+def _write_resume_checkpoint(
+    path: Path,
+    processed_records: int,
+    aggregated: Dict[Tuple[str, Tuple[str, ...]], AggregatedCandidate],
+) -> None:
+    data = {
+        "processed_records": processed_records,
+        "aggregated": [
+            {
+                "level": item.level,
+                "normalized": item.normalized,
+                "parents": list(item.parents),
+                "primary_label": item.primary_label,
+                "aliases": sorted(item.aliases),
+                "record_fingerprints": sorted(item.record_fingerprints),
+                "institutions": sorted(item.institutions),
+                "total_count": item.total_count,
+            }
+            for item in aggregated.values()
+        ],
+    }
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
 
 
 def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
@@ -97,6 +213,17 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         "--metadata",
         type=Path,
         help="Optional metadata output path",
+    )
+    parser.add_argument(
+        "--resume-from",
+        type=Path,
+        help="Optional checkpoint file to resume from",
+    )
+    parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=32,
+        help="Number of records to process per extraction batch",
     )
     return parser.parse_args(argv)
 
@@ -120,6 +247,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             previous_parents=parents,
             output_path=args.output,
             metadata_path=args.metadata,
+            resume_from=args.resume_from,
+            batch_size=args.batch_size,
         )
     except Exception as exc:  # pragma: no cover - defensive CLI guard
         logger.exception("S1 extraction failed", error=str(exc))

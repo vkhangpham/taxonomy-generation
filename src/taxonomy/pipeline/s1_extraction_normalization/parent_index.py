@@ -52,26 +52,29 @@ class ParentIndex:
             level = getattr(parent, "level", 0)
             aliases_source: Sequence[str]
             if isinstance(parent, Concept):
-                identifier = identifier or parent.canonical_label
-                base_label = parent.canonical_label
+                fallback_label = parent.canonical_label
                 aliases_source = parent.aliases
             else:
-                identifier = identifier or parent.normalized
-                base_label = parent.normalized or parent.label
+                fallback_label = parent.normalized or parent.label
                 aliases_source = parent.aliases
 
-            canonical = normalize_by_level(base_label, level, self._policy)
+            canonical = normalize_by_level(fallback_label, level, self._policy)
             aliases = tuple(
                 normalize_by_level(alias, level, self._policy)
                 for alias in aliases_source
             )
+            scoped_identifier = identifier or self._scoped_identifier(level, canonical or fallback_label)
             entry = ParentEntry(
-                identifier=identifier,
+                identifier=scoped_identifier,
                 level=level,
                 canonical=canonical,
                 aliases=aliases,
             )
             self._store_entry(entry)
+
+    @staticmethod
+    def _scoped_identifier(level: int, value: str) -> str:
+        return f"L{level}:{value}"
 
     def _store_entry(self, entry: ParentEntry) -> None:
         for key in (entry.canonical, *entry.aliases):
@@ -91,23 +94,59 @@ class ParentIndex:
             tracked for diagnostics and an empty list is returned.
         """
 
-        normalized_anchor = normalize_by_level(anchor, max(target_level - 1, 0), self._policy)
-        cache_key = (normalized_anchor, target_level)
+        cache_key = (normalize_whitespace(anchor.lower()), target_level)
         if cache_key in self._cache:
             return list(self._cache[cache_key])
 
-        matches = self._match_exact(normalized_anchor, target_level)
+        search_keys = self._anchor_forms(anchor, target_level)
+
+        matches = self._collect_matches(search_keys, target_level, exact=True)
         if not matches:
-            matches = self._match_fuzzy(normalized_anchor, target_level)
+            matches = self._collect_matches(search_keys, target_level, exact=False)
 
         if matches:
-            resolved = sorted({entry.identifier for entry in matches})
+            resolved = self._dedupe_identifiers(matches)
             self._cache[cache_key] = resolved
             return list(resolved)
 
         self._unresolved.setdefault(target_level, []).append(normalize_whitespace(anchor))
         self._cache[cache_key] = []
         return []
+
+    def _anchor_forms(self, anchor: str, target_level: int) -> List[str]:
+        """Generate normalized anchor variants from shallower levels."""
+
+        max_level = max(target_level - 1, 0)
+        seen: set[str] = set()
+        forms: List[str] = []
+        for level in range(max_level, -1, -1):
+            normalized = normalize_by_level(anchor, level, self._policy)
+            if not normalized or normalized in seen:
+                continue
+            forms.append(normalized)
+            seen.add(normalized)
+        return forms
+
+    def _collect_matches(
+        self,
+        search_keys: Sequence[str],
+        target_level: int,
+        *,
+        exact: bool,
+    ) -> List[ParentEntry]:
+        matcher = self._match_exact if exact else self._match_fuzzy
+        collected: List[ParentEntry] = []
+        for key in search_keys:
+            collected.extend(matcher(key, target_level))
+        return collected
+
+    @staticmethod
+    def _dedupe_identifiers(entries: Iterable[ParentEntry]) -> List[str]:
+        ordered: dict[str, None] = {}
+        for entry in entries:
+            if entry.identifier not in ordered:
+                ordered[entry.identifier] = None
+        return list(ordered.keys())
 
     def _match_exact(self, normalized_anchor: str, target_level: int) -> List[ParentEntry]:
         return [

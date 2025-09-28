@@ -58,8 +58,8 @@ def test_parent_index_resolves_aliases(label_policy: LabelPolicy) -> None:
     )
     index = ParentIndex(label_policy=label_policy)
     index.build_index([parent])
-    assert index.resolve_anchor("College of Engineering", 1) == ["college of engineering"]
-    assert index.resolve_anchor("College of Eng", 1) == ["college of engineering"]
+    assert index.resolve_anchor("College of Engineering", 1) == ["L0:college of engineering"]
+    assert index.resolve_anchor("College of Eng", 1) == ["L0:college of engineering"]
 
 
 def test_s1_processor_end_to_end(sample_records: List[SourceRecord], label_policy: LabelPolicy) -> None:
@@ -93,7 +93,20 @@ def test_s1_processor_end_to_end(sample_records: List[SourceRecord], label_polic
     assert len(final_candidates) == 1
     candidate = final_candidates[0]
     assert candidate.normalized == "computer science"
-    assert candidate.parents == ["college of engineering"]
+    assert candidate.parents == ["L0:college of engineering"]
     assert candidate.support.records == 2
     assert candidate.support.institutions == 1
     assert "CS" in candidate.aliases
+
+
+def test_candidate_allows_empty_parents_above_level_zero() -> None:
+    support = SupportStats(records=1, institutions=1, count=1)
+    candidate = Candidate(
+        level=1,
+        label="Computer Science",
+        normalized="computer science",
+        parents=[],
+        aliases=[],
+        support=support,
+    )
+    assert candidate.parents == []

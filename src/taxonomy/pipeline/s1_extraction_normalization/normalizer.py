@@ -69,13 +69,6 @@ class CandidateNormalizer:
                 seen.add(cleaned)
 
             parent_anchors = [normalize_whitespace(anchor.lower()) for anchor in raw.parents]
-            if level > 0 and not parent_anchors:
-                self._log.debug(
-                    "Dropping candidate without parent anchors",
-                    label=raw.label,
-                    level=level,
-                )
-                continue
 
             fingerprint = self._fingerprint_record(raw)
             support = SupportStats(records=1, institutions=1, count=1)

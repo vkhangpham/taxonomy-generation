@@ -7,7 +7,8 @@ import random
 import re
 import unicodedata
 from pathlib import Path
-from typing import Iterable, List, Sequence, TypeVar
+import itertools
+from typing import Iterable, Iterator, List, Sequence, TypeVar
 
 from .logging import get_logger, verbose_text_logging_enabled
 
@@ -81,13 +82,18 @@ def stable_shuffle(items: Sequence[T], seed: int) -> List[T]:
     return result
 
 
-def chunked(iterable: Sequence[T], size: int) -> Iterable[List[T]]:
-    """Yield chunks of a given size from the input sequence."""
+def chunked(iterable: Iterable[T], size: int) -> Iterable[List[T]]:
+    """Yield chunks of a given size from the input iterable."""
 
     if size <= 0:
         raise ValueError("size must be positive")
-    for idx in range(0, len(iterable), size):
-        yield list(iterable[idx : idx + size])
+
+    iterator: Iterator[T] = iter(iterable)
+    while True:
+        batch = list(itertools.islice(iterator, size))
+        if not batch:
+            break
+        yield batch
 
 
 __all__ = [

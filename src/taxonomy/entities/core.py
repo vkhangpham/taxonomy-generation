@@ -160,8 +160,6 @@ class Candidate(BaseModel):
     def _validate_parents(self) -> "Candidate":
         if self.level == 0 and self.parents:
             raise ValueError("level 0 candidates must not declare parents")
-        if self.level > 0 and not self.parents:
-            raise ValueError("candidates above level 0 must provide at least one parent anchor")
         return self
 
 

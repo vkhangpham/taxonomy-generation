@@ -35,6 +35,7 @@ class ExtractionMetrics:
     invalid_json: int = 0
     quarantined: int = 0
     provider_errors: int = 0
+    retries: int = 0
 
 
 class ExtractionProcessor:
@@ -44,10 +45,12 @@ class ExtractionProcessor:
         self,
         *,
         runner: Callable[[str, Dict[str, object]], object] | None = None,
+        max_retries: int = 1,
     ) -> None:
         self._runner = runner or self._default_runner
         self.metrics = ExtractionMetrics()
         self._log = get_logger(module=__name__)
+        self._max_retries = max(0, max_retries)
 
     @staticmethod
     def _default_runner(prompt_key: str, variables: Dict[str, object]) -> object:
@@ -67,37 +70,60 @@ class ExtractionProcessor:
         results: List[RawExtractionCandidate] = []
         for record in records:
             self.metrics.records_in += 1
-            variables = {
+            base_variables = {
                 "institution": record.provenance.institution,
                 "level": level,
                 "source_text": record.text,
                 "metadata": record.meta.model_dump(),
             }
-            try:
-                payload = self._runner("taxonomy.extract", variables)
-            except ValidationError as exc:
-                self.metrics.invalid_json += 1
-                self._log.warning(
-                    "LLM validation error during extraction",
-                    error=str(exc),
-                    institution=record.provenance.institution,
-                )
-                continue
-            except QuarantineError as exc:
-                self.metrics.quarantined += 1
-                self._log.error(
-                    "LLM response quarantined",
-                    error=str(exc),
-                    institution=record.provenance.institution,
-                )
-                continue
-            except ProviderError as exc:
-                self.metrics.provider_errors += 1
-                self._log.error(
-                    "Provider error during extraction",
-                    error=str(exc),
-                    institution=record.provenance.institution,
-                )
+            payload: object | None = None
+            for attempt in range(self._max_retries + 1):
+                variables = dict(base_variables)
+                if attempt > 0:
+                    variables["repair"] = True
+                try:
+                    payload = self._runner("taxonomy.extract", variables)
+                    break
+                except ValidationError as exc:
+                    self.metrics.invalid_json += 1
+                    self._log.warning(
+                        "LLM validation error during extraction",
+                        error=str(exc),
+                        institution=record.provenance.institution,
+                        attempt=attempt,
+                    )
+                    if attempt >= self._max_retries:
+                        payload = None
+                        break
+                    self.metrics.retries += 1
+                    continue
+                except ProviderError as exc:
+                    self.metrics.provider_errors += 1
+                    self._log.error(
+                        "Provider error during extraction",
+                        error=str(exc),
+                        institution=record.provenance.institution,
+                        attempt=attempt,
+                    )
+                    if not getattr(exc, "retryable", False) or attempt >= self._max_retries:
+                        payload = None
+                        break
+                    self.metrics.retries += 1
+                    continue
+                except QuarantineError as exc:
+                    self.metrics.quarantined += 1
+                    self._log.error(
+                        "LLM response quarantined",
+                        error=str(exc),
+                        institution=record.provenance.institution,
+                        attempt=attempt,
+                    )
+                    payload = None
+                    break
+            else:
+                payload = None
+
+            if payload is None:
                 continue
 
             raw_candidates = self._coerce_payload(payload, record)

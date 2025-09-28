@@ -7,7 +7,7 @@ This specification defines the functional logic, decision rules, and invariants 
   - text (string), provenance {institution, url, section, fetched_at}, meta {language, charset, hints}
   - Purpose: smallest analyzable unit after segmentation; carries evidence.
 - Candidate (pre‑merge, pre‑disambiguation)
-  - level ∈ {0,1,2,3}, label (original), normalized (canonical), parents (anchors or ids), aliases[], support {records[], institutions[], count}
+  - level ∈ {0,1,2,3}, label (original), normalized (canonical), parents (anchors or ids; may be empty above L0 when unresolved), aliases[], support {records[], institutions[], count}
   - Purpose: unit of decision‑making across S1–S3.
 - Concept (post‑gates)
   - id (stable), level, canonical_label, parents, aliases[], support, rationale {passed_gates[], reasons, thresholds}
@@ -24,7 +24,7 @@ This specification defines the functional logic, decision rules, and invariants 
 - Whitespace: collapse internal spaces; trim; normalize hyphens/underscores.
 - Punctuation: strip trailing punctuation; keep internal hyphens only if policy allows.
 - Diacritics: fold to ASCII for comparison; store original in aliases.
-- Acronyms: detect patterns (e.g., “EECS”, “CS”); map to expanded forms where unambiguous; keep both as aliases.
+- Acronyms: detect patterns (e.g., “EECS”, “CS”); map to expanded forms when context confirms or policy allows; ambiguous cases (e.g., “AI”) remain short unless explicitly enabled.
 - Stop terms: remove leading institutional boilerplate (e.g., “Department of”, “School of”) during normalization for L1; record original in aliases.
 
 ## Step Logic
@@ -39,7 +39,7 @@ S1 Extraction & Normalization (LLM‑assisted)
   - Determinism: require sorted outputs (by normalized, case‑insensitive) and temperature 0.0.
 - Post‑processing:
   - Apply normalization rules again; drop empty/invalid; attach SourceRecord to support.records.
-  - Parent anchoring: resolve anchors to concrete parents when possible; otherwise keep as hints.
+  - Parent anchoring: resolve anchors to concrete parents when possible by normalizing across all shallower levels; when no identifier exists, produce a scoped fallback identifier (`L{level}:{normalized}`) and carry empty anchors forward for later resolution.
 
 S2 Cross‑Institution Frequency Filtering
 - Compute metrics per candidate key = (level, normalized, parent_lineage_key):
@@ -119,9 +119,10 @@ S3 Single‑Token Verification (Label Minimality)
   - Validation, Disambiguation, Deduplication are multi‑pass capable: repeat until a fixed point (no changes to findings/splits/merges).
 
 - Phase 4: Resume Semantics
-  - Persist artifacts and operation logs after each phase; maintain a ledger of per‑concept status and last operation.
-  - A subsequent run can reload the ledger and continue from any completed phase, or re‑enter an iterative phase.
+  - Persist artifacts and operation logs after each phase; maintain a ledger of per-concept status and last operation.
+  - A subsequent run can reload the ledger and continue from any completed phase, or re-enter an iterative phase.
   - Determinism ensures repeated runs with the same inputs/policies yield identical results.
+  - The S1 CLI persists per-batch checkpoints (processed record count + aggregated candidates) via `--resume-from`, skipping already processed records on restart.
 
 - Phase 5: Finalization
   - Assemble the four‑level DAG with invariant checks, produce summaries and a signed manifest capturing versions, thresholds, seeds, counters, and sampled evidence.
@@ -138,7 +139,7 @@ S3 Single‑Token Verification (Label Minimality)
 - Determinism: sorted inputs, fixed seeds, stable canonical selection tie‑breakers.
 
 ## Failure Handling
-- Timeouts and provider errors return structured retries with backoff; quarantine irrecoverable records.
+- Timeouts, validation failures, and retryable provider errors trigger structured retries with exponential backoff; extraction retries include a `repair` hint to the LLM. Irrecoverable records enter quarantine.
 - Partial results are acceptable; never block the batch; mark completeness and reasons.
 
 ## Edge Cases (Test Fixtures Required)
