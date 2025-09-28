@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import re
-from typing import Dict, Iterable, List, Sequence
+from typing import ClassVar, Dict, Iterable, List, Sequence
 
 from ...config.policies import RuleValidationSettings, ValidationPolicy
 from ...entities.core import Concept, FindingMode, ValidationFinding
@@ -26,7 +26,7 @@ class RuleResult:
 class RuleValidator:
     """Apply deterministic validation rules to concepts."""
 
-    HARD_VIOLATION_PREFIXES: frozenset[str] = frozenset(
+    HARD_VIOLATION_PREFIXES: ClassVar[frozenset[str]] = frozenset(
         {
             "forbidden_pattern",
             "root_has_parents",
@@ -40,7 +40,7 @@ class RuleValidator:
         self._settings = policy.rules
         required_vocabularies = self._settings.required_vocabularies or {}
         self._required_vocabularies = {
-            level: tuple(token.lower() for token in tokens if token)
+            int(level): tuple(token.lower() for token in tokens if token)
             for level, tokens in required_vocabularies.items()
         }
         self._compile_patterns()
