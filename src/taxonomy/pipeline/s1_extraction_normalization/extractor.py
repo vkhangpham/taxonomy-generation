@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 from contextlib import nullcontext
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from threading import Lock
 from time import perf_counter
 from typing import Callable, Dict, List, Mapping, Sequence, TYPE_CHECKING
 
@@ -32,7 +33,10 @@ class RawExtractionCandidate:
 
 @dataclass
 class ExtractionMetrics:
-    """Counters tracked for legacy compatibility in S1 extraction."""
+    """Counters tracked for legacy compatibility in S1 extraction.
+
+    Instances are safe to share across threads thanks to an internal lock.
+    """
 
     records_in: int = 0
     candidates_out: int = 0
@@ -40,6 +44,7 @@ class ExtractionMetrics:
     quarantined: int = 0
     provider_errors: int = 0
     retries: int = 0
+    _lock: Lock = field(default_factory=Lock, init=False, repr=False)
 
     @classmethod
     def from_observability(
@@ -77,15 +82,31 @@ class ExtractionMetrics:
             retries=int(counters.get("retries", 0)),
         )
 
+    def increment(self, field: str, delta: int = 1) -> None:
+        """Thread-safe helper to adjust a counter by *delta*."""
+
+        if delta == 0:
+            return
+
+        with self._lock:
+            try:
+                current = getattr(self, field)
+            except AttributeError as exc:
+                raise AttributeError(
+                    f"ExtractionMetrics has no counter named '{field}'"
+                ) from exc
+            setattr(self, field, int(current) + int(delta))
+
     def as_dict(self) -> Dict[str, int]:
-        return {
-            "records_in": self.records_in,
-            "candidates_out": self.candidates_out,
-            "invalid_json": self.invalid_json,
-            "quarantined": self.quarantined,
-            "provider_errors": self.provider_errors,
-            "retries": self.retries,
-        }
+        with self._lock:
+            return {
+                "records_in": int(self.records_in),
+                "candidates_out": int(self.candidates_out),
+                "invalid_json": int(self.invalid_json),
+                "quarantined": int(self.quarantined),
+                "provider_errors": int(self.provider_errors),
+                "retries": int(self.retries),
+            }
 
 
 class ExtractionProcessor:
@@ -117,8 +138,7 @@ class ExtractionProcessor:
     def _increment_legacy(self, field: str, delta: int = 1) -> None:
         if self._observability is not None:
             return
-        current = getattr(self._legacy_metrics, field)
-        setattr(self._legacy_metrics, field, current + delta)
+        self._legacy_metrics.increment(field, delta)
 
     def bind_observability(self, context: "ObservabilityContext") -> None:
         self._observability = context
