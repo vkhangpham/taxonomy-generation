@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import List, Optional, Protocol, TYPE_CHECKING
+from typing import Dict, List, Optional, Protocol, TYPE_CHECKING
 
 from loguru import logger
 
@@ -30,11 +30,20 @@ class Pipeline:
     checkpoint_manager: Optional["CheckpointManager"] = None
     raise_on_error: bool = True
     completed_steps: List[str] = field(default_factory=list)
+    _steps_by_name: Dict[str, PipelineStep] = field(
+        default_factory=dict, init=False, repr=False
+    )
+
+    def __post_init__(self) -> None:
+        self._ensure_steps_index()
 
     def execute(self, *, resume_from: str | None = None) -> None:
-        # Fail-fast if the given resume point doesn’t exist
-        if resume_from is not None and resume_from not in {step.name for step in self.steps}:
-            raise ValueError(f"Unknown resume_from step '{resume_from}'")
+        self._ensure_steps_index()
+        step_names = list(self._steps_by_name.keys())
+        if resume_from is not None and resume_from not in self._steps_by_name:
+            raise ValueError(
+                f"Unknown resume_from step '{resume_from}'. Valid steps: {step_names}"
+            )
         skipping = resume_from is not None
 
         for step in self.steps:
@@ -65,7 +74,11 @@ class Pipeline:
                 )
 
     def add_step(self, step: PipelineStep) -> None:
+        self._ensure_steps_index()
+        if step.name in self._steps_by_name:
+            raise ValueError(f"Duplicate pipeline step name '{step.name}'")
         self.steps.append(step)
+        self._steps_by_name[step.name] = step
 
     def status(self) -> dict:
         remaining = [step.name for step in self.steps if step.name not in self.completed_steps]
@@ -74,6 +87,17 @@ class Pipeline:
             "completed": list(self.completed_steps),
             "pending": remaining,
         }
+
+    def _ensure_steps_index(self) -> None:
+        if len(self._steps_by_name) == len(self.steps):
+            return
+        self._steps_by_name.clear()
+        for step in self.steps:
+            if step.name in self._steps_by_name:
+                raise ValueError(
+                    f"Duplicate pipeline step name '{step.name}' detected while refreshing step index."
+                )
+            self._steps_by_name[step.name] = step
 
 
 __all__ = ["Pipeline", "PipelineStep"]
