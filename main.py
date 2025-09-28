@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 from pathlib import Path
 from typing import Any, Dict, Iterable
 
@@ -23,7 +24,11 @@ def _parse_override(argument: str) -> Dict[str, Any]:
     segments = key.split(".")
     for segment in segments[:-1]:
         cursor = cursor.setdefault(segment, {})
-    cursor[segments[-1]] = value
+    try:
+        parsed_value = json.loads(value)
+    except json.JSONDecodeError:
+        parsed_value = value
+    cursor[segments[-1]] = parsed_value
     return target
 
 
@@ -43,6 +48,13 @@ def _merge_overrides(overrides: Iterable[Dict[str, Any]]) -> Dict[str, Any]:
     return result
 
 
+def _settings_from_env(environment: str | None, data: Dict[str, Any] | None = None) -> Settings:
+    config: Dict[str, Any] = dict(data or {})
+    if environment is not None:
+        config["environment"] = environment
+    return Settings(**config)
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Taxonomy pipeline CLI")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -53,7 +65,7 @@ def _build_parser() -> argparse.ArgumentParser:
     run_parser.add_argument(
         "--override",
         action="append",
-        default=[],
+        default=None,
         type=_parse_override,
         help="Configuration override expressed as dotted.key=value",
     )
@@ -72,7 +84,7 @@ def _build_parser() -> argparse.ArgumentParser:
     validate_parser.add_argument(
         "--override",
         action="append",
-        default=[],
+        default=None,
         type=_parse_override,
     )
 
@@ -84,10 +96,14 @@ def main(argv: Iterable[str] | None = None) -> int:
     args = parser.parse_args(list(argv) if argv is not None else None)
 
     if args.command == "run":
-        overrides = _merge_overrides(args.override)
+        overrides = _merge_overrides(args.override or [])
         if args.environment:
             overrides["environment"] = args.environment
-        result = run_taxonomy_pipeline(config_overrides=overrides, resume_from=args.resume_phase)
+        try:
+            result = run_taxonomy_pipeline(config_overrides=overrides, resume_from=args.resume_phase)
+        except Exception:  # pragma: no cover - defensive logging
+            _LOGGER.exception("Failed to run taxonomy pipeline", resume_phase=args.resume_phase)
+            return 2
         _LOGGER.info(
             "Run complete",
             manifest=str(result.manifest_path),
@@ -96,45 +112,38 @@ def main(argv: Iterable[str] | None = None) -> int:
         return 0
 
     if args.command == "resume":
-        settings_kwargs = {}
-        if args.environment:
-            settings_kwargs["environment"] = args.environment
-        settings = Settings(**settings_kwargs)
-        orchestrator = TaxonomyOrchestrator.from_settings(settings, run_id=args.run_id)
-        orchestrator.run(resume_phase=args.phase)
+        try:
+            settings = _settings_from_env(args.environment)
+            orchestrator = TaxonomyOrchestrator.from_settings(settings, run_id=args.run_id)
+            orchestrator.run(resume_phase=args.phase)
+        except Exception:  # pragma: no cover - defensive logging
+            _LOGGER.exception("Failed to resume run", run_id=args.run_id, phase=args.phase)
+            return 2
         return 0
 
     if args.command == "status":
-        settings_kwargs = {}
-        if args.environment:
-            settings_kwargs["environment"] = args.environment
-        settings = Settings(**settings_kwargs)
-        run_root = Path(settings.paths.output_dir) / "runs"
-        checkpoint_dir = run_root / args.run_id
-        if not checkpoint_dir.exists():
-            _LOGGER.info("No checkpoints found", run_id=args.run_id)
-            return 0
-        manager = CheckpointManager(args.run_id, run_root)
-        for phase in sorted(manager.base_directory.glob("*.checkpoint.json")):
-            _LOGGER.info("Checkpoint", phase=phase.name)
+        try:
+            settings = _settings_from_env(args.environment)
+            run_root = Path(settings.paths.output_dir) / "runs"
+            checkpoint_dir = run_root / args.run_id
+            if not checkpoint_dir.exists():
+                _LOGGER.info("No checkpoints found", run_id=args.run_id)
+                return 0
+            manager = CheckpointManager(args.run_id, run_root)
+            for phase in sorted(manager.base_directory.glob("*.checkpoint.json")):
+                _LOGGER.info("Checkpoint", phase=phase.name)
+        except Exception:  # pragma: no cover - defensive logging
+            _LOGGER.exception("Failed to inspect run status", run_id=args.run_id)
+            return 2
         return 0
 
     if args.command == "validate":
-        overrides = _merge_overrides(args.override)
-        if args.environment:
-            overrides["environment"] = args.environment
-        Settings(**overrides)
-        _LOGGER.info("Configuration validated successfully")
-        return 0
-        for phase in sorted(manager.base_directory.glob("*.checkpoint.json")):
-            _LOGGER.info("Checkpoint", phase=phase.name)
-        return 0
-
-    if args.command == "validate":
-        overrides = _merge_overrides(args.override)
-        if args.environment:
-            overrides["environment"] = args.environment
-        Settings(**overrides)
+        overrides = _merge_overrides(args.override or [])
+        try:
+            _settings_from_env(args.environment, overrides)
+        except Exception:  # pragma: no cover - defensive logging
+            _LOGGER.exception("Configuration validation failed")
+            return 2
         _LOGGER.info("Configuration validated successfully")
         return 0
 
