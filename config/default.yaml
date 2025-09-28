@@ -213,6 +213,20 @@ policies:
       l0_l1: 0.93
       l2_l3: 0.9
     merge_policy: conservative
+    prefix_length: 6
+    phonetic_enabled: true
+    acronym_blocking_enabled: true
+    max_block_size: 1000
+    jaro_winkler_weight: 1.0
+    jaccard_weight: 1.0
+    abbrev_score_weight: 1.2
+    min_similarity_threshold: 0.85
+    parent_context_strict: true
+    cross_parent_merge_allowed: false
+    max_comparisons_per_block: 10000
+    enable_early_stopping: true
+    sample_merge_count: 10
+    detailed_logging: false
   raw_extraction:
     segment_on_headers: true
     segment_on_lists: true

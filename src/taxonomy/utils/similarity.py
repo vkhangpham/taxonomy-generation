@@ -1,4 +1,4 @@
-"""Text similarity helpers for intra-page deduplication."""
+"""Text similarity helpers for intra-page deduplication and concept merging."""
 
 from __future__ import annotations
 
@@ -6,7 +6,9 @@ import hashlib
 import math
 import re
 from functools import lru_cache
-from typing import Iterable, List, Sequence, Tuple
+from typing import Callable, Dict, Iterable, List, Sequence, Tuple
+
+import jellyfish
 
 from .helpers import normalize_whitespace
 from .logging import get_logger, verbose_text_logging_enabled
@@ -14,6 +16,12 @@ from .logging import get_logger, verbose_text_logging_enabled
 
 _NON_WORD_RE = re.compile(r"[^\w\s]+", re.UNICODE)
 _LOGGER = get_logger(module=__name__)
+
+
+def _ordered_pair(text1: str, text2: str) -> Tuple[str, str]:
+    """Return a deterministic ordering of two strings for cache keys."""
+
+    return (text1, text2) if text1 <= text2 else (text2, text1)
 
 
 @lru_cache(maxsize=2048)
@@ -41,6 +49,18 @@ def preprocess_for_similarity(text: str) -> str:
     return collapsed
 
 
+@lru_cache(maxsize=2048)
+def _tokenize(text: str) -> Tuple[str, ...]:
+    """Tokenize preprocessed text and cache the result."""
+
+    normalized = preprocess_for_similarity(text)
+    if not normalized:
+        return tuple()
+    tokens = tuple(normalized.split())
+    _LOGGER.debug("Tokenized text", token_count=len(tokens))
+    return tokens
+
+
 def _generate_shingles(text: str, n: int) -> List[str]:
     if n <= 0:
         raise ValueError("n must be positive for shingling")
@@ -59,7 +79,7 @@ def _ensure_shingles(text1: str, text2: str, n: int) -> Tuple[List[str], List[st
 
 
 def jaccard_similarity(text1: str, text2: str, *, n: int = 3) -> float:
-    """Compute the Jaccard similarity coefficient between two strings."""
+    """Compute the shingled Jaccard similarity coefficient between two strings."""
 
     shingles_a, shingles_b = _ensure_shingles(text1, text2, n)
     if not shingles_a and not shingles_b:
@@ -79,6 +99,54 @@ def jaccard_similarity(text1: str, text2: str, *, n: int = 3) -> float:
         intersection=intersection,
         union=union,
         shingles=len(shingles_a) + len(shingles_b),
+    )
+    return score
+
+
+def token_jaccard_similarity(text1: str, text2: str) -> float:
+    """Compute Jaccard similarity over token sets with preprocessing."""
+
+    tokens_a = set(_tokenize(text1))
+    tokens_b = set(_tokenize(text2))
+    if not tokens_a and not tokens_b:
+        return 1.0
+    if not tokens_a or not tokens_b:
+        return 0.0
+    intersection = len(tokens_a & tokens_b)
+    union = len(tokens_a | tokens_b)
+    if union == 0:
+        return 0.0
+    score = intersection / union
+    _LOGGER.debug(
+        "Computed token Jaccard similarity",
+        score=score,
+        intersection=intersection,
+        union=union,
+        token_count=len(tokens_a) + len(tokens_b),
+    )
+    return score
+
+
+@lru_cache(maxsize=4096)
+def _jaro_winkler_cached(text1: str, text2: str) -> float:
+    ordered_a, ordered_b = _ordered_pair(text1, text2)
+    return jellyfish.jaro_winkler_similarity(ordered_a, ordered_b)
+
+
+def jaro_winkler_similarity(text1: str, text2: str, *, prefix_weight: float = 0.1) -> float:
+    """Compute the Jaro-Winkler similarity between two strings."""
+
+    normalized_1 = preprocess_for_similarity(text1)
+    normalized_2 = preprocess_for_similarity(text2)
+    if not normalized_1 and not normalized_2:
+        return 1.0
+    if not normalized_1 or not normalized_2:
+        return 0.0
+    score = _jaro_winkler_cached(normalized_1, normalized_2)
+    _LOGGER.debug(
+        "Computed Jaro-Winkler similarity",
+        score=score,
+        prefix_weight=prefix_weight,
     )
     return score
 
@@ -120,12 +188,62 @@ def minhash_similarity(text1: str, text2: str, *, num_hashes: int = 128, n: int 
     return score
 
 
-def compute_similarity(text1: str, text2: str, *, method: str = "jaccard_shingles", **kwargs: object) -> float:
+def _combined_similarity(
+    text1: str,
+    text2: str,
+    *,
+    jaro_weight: float = 1.0,
+    jaccard_weight: float = 1.0,
+    abbrev_weight: float = 1.0,
+    prefix_weight: float = 0.1,
+    aggregator: str = "max",
+    abbrev_func: Callable[[str, str], float] | None = None,
+    abbrev_score: float | None = None,
+) -> Tuple[float, Dict[str, float]]:
+    """Compute a weighted combination of similarity measures."""
+
+    jw = jaro_winkler_similarity(text1, text2, prefix_weight=prefix_weight)
+    jaccard = token_jaccard_similarity(text1, text2)
+    abbrev = (
+        abbrev_func(text1, text2)
+        if abbrev_func is not None
+        else (abbrev_score if abbrev_score is not None else 0.0)
+    )
+
+    weighted_scores = {
+        "jaro_winkler": jw * jaro_weight,
+        "token_jaccard": jaccard * jaccard_weight,
+        "abbrev_score": abbrev * abbrev_weight,
+    }
+
+    if aggregator == "max":
+        combined = max(weighted_scores.values())
+    elif aggregator == "sum":
+        combined = sum(weighted_scores.values())
+    else:
+        raise ValueError(f"Unsupported aggregator: {aggregator}")
+
+    return combined, {
+        "jaro_winkler": jw,
+        "token_jaccard": jaccard,
+        "abbrev_score": abbrev,
+    }
+
+
+def compute_similarity(
+    text1: str,
+    text2: str,
+    *,
+    method: str = "jaccard_shingles",
+    **kwargs: object,
+) -> float | Tuple[float, Dict[str, float]]:
     """Dispatch similarity computation based on the configured method."""
 
     method_normalized = method.lower()
     if method_normalized == "jaccard_shingles":
         return jaccard_similarity(text1, text2, **{"n": kwargs.get("n", 3)})
+    if method_normalized == "token_jaccard":
+        return token_jaccard_similarity(text1, text2)
     if method_normalized == "minhash":
         return minhash_similarity(
             text1,
@@ -133,6 +251,27 @@ def compute_similarity(text1: str, text2: str, *, method: str = "jaccard_shingle
             num_hashes=int(kwargs.get("num_hashes", 128)),
             n=int(kwargs.get("n", 3)),
         )
+    if method_normalized == "jaro_winkler":
+        return jaro_winkler_similarity(
+            text1,
+            text2,
+            prefix_weight=float(kwargs.get("prefix_weight", 0.1)),
+        )
+    if method_normalized == "combined":
+        combined, components = _combined_similarity(
+            text1,
+            text2,
+            jaro_weight=float(kwargs.get("jaro_weight", 1.0)),
+            jaccard_weight=float(kwargs.get("jaccard_weight", 1.0)),
+            abbrev_weight=float(kwargs.get("abbrev_weight", 1.0)),
+            prefix_weight=float(kwargs.get("prefix_weight", 0.1)),
+            aggregator=str(kwargs.get("aggregator", "max")),
+            abbrev_func=kwargs.get("abbrev_func"),
+            abbrev_score=kwargs.get("abbrev_score"),
+        )
+        if kwargs.get("return_components"):
+            return combined, components
+        return combined
     raise ValueError(f"Unsupported similarity method: {method}")
 
 
@@ -179,6 +318,8 @@ def find_duplicates(
 __all__ = [
     "preprocess_for_similarity",
     "jaccard_similarity",
+    "token_jaccard_similarity",
+    "jaro_winkler_similarity",
     "minhash_similarity",
     "compute_similarity",
     "find_duplicates",
