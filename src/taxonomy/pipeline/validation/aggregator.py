@@ -58,10 +58,14 @@ class ValidationAggregator:
             vote_weight += weights.rule_weight
 
         if web_result is not None:
-            total_weight += weights.web_weight
-            scores["web"] = weights.web_weight if web_result.passed else 0.0
-            if web_result.passed:
-                vote_weight += weights.web_weight
+            web_unknown = bool(getattr(web_result, "unknown", False))
+            if not web_unknown:
+                total_weight += weights.web_weight
+                scores["web"] = weights.web_weight if web_result.passed else 0.0
+                if web_result.passed:
+                    vote_weight += weights.web_weight
+            else:
+                scores["web"] = 0.0
         else:
             scores["web"] = 0.0
 
@@ -75,8 +79,19 @@ class ValidationAggregator:
 
         threshold = total_weight / 2.0 if total_weight else 0.0
         passed = vote_weight > threshold
-        if not passed and not weights.tie_break_conservative and vote_weight == threshold:
-            passed = True
+        tie = vote_weight == threshold
+        if tie:
+            if not weights.tie_break_conservative:
+                passed = True
+            else:
+                evidence_strength = self._evidence_strength(web_result, llm_result)
+                min_strength = weights.tie_break_min_strength
+                if min_strength is None:
+                    min_strength = self._policy.llm.confidence_threshold
+                if evidence_strength >= min_strength:
+                    passed = True
+                else:
+                    passed = False
 
         confidence = 0.0 if total_weight == 0 else vote_weight / total_weight
         rationale = self._format_rationale("Weighted aggregation", [rule_result, web_result, llm_result])
@@ -110,3 +125,19 @@ class ValidationAggregator:
             yield from web_result.findings
         if llm_result is not None:
             yield from llm_result.findings
+
+    def _evidence_strength(
+        self, web_result: Optional[WebResult], llm_result: Optional[LLMResult]
+    ) -> float:
+        web_strength = 0.0
+        if (
+            web_result is not None
+            and not bool(getattr(web_result, "unknown", False))
+            and web_result.evidence
+        ):
+            scores = [snippet.score for snippet in web_result.evidence]
+            if scores:
+                web_strength = sum(scores) / len(scores)
+
+        llm_strength = llm_result.confidence if llm_result is not None else 0.0
+        return max(web_strength, llm_strength)

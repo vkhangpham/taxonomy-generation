@@ -176,6 +176,7 @@ class RuleValidationSettings(BaseModel):
     required_vocabularies: Dict[int, List[str]] = Field(default_factory=dict)
     venue_patterns: List[str] = Field(default_factory=list)
     structural_checks_enabled: bool = Field(default=True)
+    venue_detection_hard: bool = Field(default=False)
 
     @field_validator("forbidden_patterns", "venue_patterns")
     @classmethod
@@ -222,6 +223,7 @@ class ValidationAggregationSettings(BaseModel):
     llm_weight: float = Field(default=0.4, ge=0.0)
     hard_rule_failure_blocks: bool = Field(default=True)
     tie_break_conservative: bool = Field(default=True)
+    tie_break_min_strength: float | None = Field(default=None, ge=0.0)
 
 
 class EvidenceStorageSettings(BaseModel):

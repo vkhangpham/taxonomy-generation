@@ -44,10 +44,15 @@ class ValidationProcessor:
         self._aggregator = ValidationAggregator(policy)
         self._stats = {
             "concepts": 0,
+            "checked": 0,
             "rule_passed": 0,
+            "rule_failed": 0,
             "web_passed": 0,
+            "web_failed": 0,
             "llm_passed": 0,
+            "llm_failed": 0,
             "validation_passed": 0,
+            "passed_all": 0,
         }
 
     @property
@@ -61,9 +66,12 @@ class ValidationProcessor:
         outcomes: List[ValidationOutcome] = []
         for concept in concepts:
             self._stats["concepts"] += 1
+            self._stats["checked"] += 1
             rule_result = self._rule_validator.validate_concept(concept)
             if rule_result.passed:
                 self._stats["rule_passed"] += 1
+            else:
+                self._stats["rule_failed"] += 1
 
             web_result: WebResult | None = None
             evidence_payload: List[EvidenceSnippet] = []
@@ -71,6 +79,8 @@ class ValidationProcessor:
                 web_result = self._web_validator.validate_concept(concept)
                 if web_result.passed:
                     self._stats["web_passed"] += 1
+                elif not web_result.unknown:
+                    self._stats["web_failed"] += 1
                 evidence_payload = [snippet for snippet in web_result.evidence]
 
             llm_result: LLMResult | None = None
@@ -78,12 +88,15 @@ class ValidationProcessor:
                 llm_result = self._llm_validator.validate_concept(concept, evidence_payload)
                 if llm_result.passed:
                     self._stats["llm_passed"] += 1
+                else:
+                    self._stats["llm_failed"] += 1
 
             decision = self._aggregator.aggregate(
                 concept.id, rule_result, web_result, llm_result
             )
             if decision.passed:
                 self._stats["validation_passed"] += 1
+                self._stats["passed_all"] += 1
 
             concept.validation_metadata["evidence_count"] = len(evidence_payload)
             if evidence_payload:

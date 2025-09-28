@@ -62,9 +62,14 @@ class LLMValidator:
             return LLMResult(False, 0.0, findings, "LLM call failed")
 
         result = response.get("content", {}) or {}
-        passed = bool(result.get("validated", False))
+        passed = bool(result.get("pass", result.get("validated", False)))
         reason = result.get("reason", "No reason provided")
-        confidence = float(result.get("confidence", 0.0))
+
+        confidence_raw = result.get("confidence", 0.0)
+        try:
+            confidence = float(confidence_raw)
+        except (TypeError, ValueError):  # pragma: no cover - defensive
+            confidence = 0.0
         confidence = self.assess_confidence(confidence, evidence)
 
         findings = [

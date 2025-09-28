@@ -81,10 +81,10 @@ S3 Single‑Token Verification (Label Minimality)
 - Use LLM disambiguation prompt to confirm splits and produce concise sense glosses.
 
 ## Validation Modes & Aggregation
-- Rule validation: pattern and vocabulary checks; level‑specific forbidden/required forms.
-- Web validation: confirm keyword/phrase presence in source or authoritative pages; capture evidence snippets.
-- LLM validation: entailment prompt “Does evidence support that label X is a legitimate level‑Y concept at institution Z?” → JSON {pass, reason}.
-- Aggregation policy: FAIL if any hard rule fails; otherwise majority vote with weights (rule > web > LLM). Always record all findings.
+- Rule validation: pattern and vocabulary checks; level‑specific forbidden/required forms. Venue detections at L3 emit soft warnings by default, escalate when they collide with forbidden patterns, and can be force-escalated via `rules.venue_detection_hard`.
+- Web validation: confirm keyword/phrase presence in source or authoritative pages; capture evidence snippets. Authority lists match both apex domains and subdomains. An empty index or timeout surfaces an `unknown` tri-state (non-voting) while still recording findings, and snapshot lookup no longer truncates before aggregation.
+- LLM validation: entailment prompt “Does evidence support that label X is a legitimate level‑Y concept at institution Z?” → JSON {pass, reason, confidence?}; legacy `validated` keys are normalized to `pass`.
+- Aggregation policy: FAIL if any hard rule fails; otherwise weighted vote (rule > web > LLM). Conservative ties only flip to PASS when evidence strength (max of web average snippet score and LLM confidence) meets `aggregation.tie_break_min_strength` (defaults to the LLM confidence threshold), and `unknown` web checks contribute no weight. Always record all findings.
 
 ## Hierarchy Assembly & Invariants
 - Build a DAG with exactly four levels; each node has exactly one parent except L0 (root level); exceptions documented.
@@ -134,12 +134,13 @@ S3 Single‑Token Verification (Label Minimality)
 - Protocol: stratified train/dev split; early stop on no improvement; report per‑level metrics and error categories.
 
 ## Observability & Reproducibility
-- Counters per step: input, kept, dropped (by reason), merged, split, validated_pass/fail.
+- Counters per step: input, kept, dropped (by reason), merged, split, validated_pass/fail. Validation additionally exposes checked, rule_failed, web_failed, llm_failed, passed_all (with legacy pass counters retained for dashboards).
 - Manifest per run: prompt versions, thresholds, seeds, time, evidence samples.
 - Determinism: sorted inputs, fixed seeds, stable canonical selection tie‑breakers.
 
 ## Failure Handling
 - Timeouts, validation failures, and retryable provider errors trigger structured retries with exponential backoff; extraction retries include a `repair` hint to the LLM. Irrecoverable records enter quarantine.
+- Web evidence timeouts record an `unknown` outcome (no vote) after exhausting retries; downstream aggregation treats these as informational only.
 - Partial results are acceptable; never block the batch; mark completeness and reasons.
 
 ## Edge Cases (Test Fixtures Required)

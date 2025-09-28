@@ -19,6 +19,7 @@ class WebResult:
     findings: List[ValidationFinding]
     summary: str
     evidence: List[EvidenceSnippet]
+    unknown: bool = False
 
 
 class WebValidator:
@@ -28,26 +29,54 @@ class WebValidator:
         self._policy = policy
         self._indexer = indexer
 
-    def validate_concept(self, concept: Concept) -> WebResult:
+    def validate_concept(
+        self, concept: Concept, *, retrieval_timed_out: bool = False
+    ) -> WebResult:
         snapshots = self._indexer.search_evidence(concept.canonical_label)
         evidence = self._indexer.aggregate_evidence(
             concept.canonical_label,
             snapshots,
         )
 
-        passed = len(evidence) >= self._policy.web.min_snippet_matches
-        findings = self._build_findings(concept, evidence, passed)
-        summary = self._summarize(evidence)
+        unknown = False
+        if retrieval_timed_out:
+            unknown = True
+        elif not snapshots and self._indexer.is_empty():
+            unknown = True
+
+        passed = not unknown and len(evidence) >= self._policy.web.min_snippet_matches
+        findings = self._build_findings(concept, evidence, passed, unknown, retrieval_timed_out)
+        summary = self._summarize(evidence, unknown, retrieval_timed_out)
         return WebResult(
             passed=passed,
             findings=findings,
             summary=summary,
             evidence=evidence,
+            unknown=unknown,
         )
 
     def _build_findings(
-        self, concept: Concept, evidence: List[EvidenceSnippet], passed: bool
+        self,
+        concept: Concept,
+        evidence: List[EvidenceSnippet],
+        passed: bool,
+        unknown: bool,
+        timed_out: bool,
     ) -> List[ValidationFinding]:
+        if unknown:
+            timeout_note = (
+                f" (timeout after {self._policy.web.evidence_timeout_seconds:.1f}s)"
+                if timed_out
+                else ""
+            )
+            return [
+                ValidationFinding(
+                    concept_id=concept.id,
+                    mode=FindingMode.WEB,
+                    passed=False,
+                    detail=f"Web evidence unavailable{timeout_note}.",
+                )
+            ]
         if not evidence:
             return [
                 ValidationFinding(
@@ -76,8 +105,15 @@ class WebValidator:
             )
         ]
 
-    @staticmethod
-    def _summarize(evidence: List[EvidenceSnippet]) -> str:
+    def _summarize(
+        self, evidence: List[EvidenceSnippet], unknown: bool, timed_out: bool
+    ) -> str:
+        if unknown:
+            if timed_out:
+                return (
+                    f"No evidence (timeout after {self._policy.web.evidence_timeout_seconds:.1f}s)"
+                )
+            return "No evidence (index empty)"
         if not evidence:
             return "No evidence"
         return f"Evidence snippets: {len(evidence)}"

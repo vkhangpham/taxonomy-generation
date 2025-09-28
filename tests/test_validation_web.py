@@ -52,14 +52,42 @@ def test_web_validator_collects_evidence() -> None:
 def test_evidence_authority_respects_policy() -> None:
     policy = ValidationPolicy()
     policy = policy.model_copy(update={
-        "web": policy.web.model_copy(update={"authoritative_domains": ["example.edu"]})
+        "web": policy.web.model_copy(update={"authoritative_domains": ["wikipedia.org"]})
     })
     indexer = EvidenceIndexer(policy)
-    snap = _snapshot("text about robotics", url="https://example.edu/robotics")
+    snap = _snapshot("text about robotics", url="https://en.wikipedia.org/robotics")
     indexer.build_index([snap])
 
     authority = indexer.assess_authority(snap)
     assert authority == 1.0
+
+
+def test_web_validator_marks_unknown_when_index_empty() -> None:
+    policy = ValidationPolicy()
+    indexer = EvidenceIndexer(policy)
+    indexer.build_index([])
+
+    validator = WebValidator(policy, indexer)
+    result = validator.validate_concept(_concept("Quantum Computing"))
+
+    assert not result.passed
+    assert result.unknown
+    assert "index empty" in result.summary
+
+
+def test_web_validator_marks_unknown_on_timeout() -> None:
+    policy = ValidationPolicy()
+    indexer = EvidenceIndexer(policy)
+    indexer.build_index([
+        _snapshot("Quantum Computing degree program", url="https://example.edu/quantum"),
+    ])
+
+    validator = WebValidator(policy, indexer)
+    result = validator.validate_concept(_concept("Quantum Computing"), retrieval_timed_out=True)
+
+    assert not result.passed
+    assert result.unknown
+    assert "timeout" in result.summary
 
 
 def test_snippet_respects_length_limit() -> None:

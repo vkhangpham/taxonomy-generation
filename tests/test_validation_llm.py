@@ -51,6 +51,30 @@ def test_llm_validator_success() -> None:
     assert "passed" in result.summary
 
 
+def test_llm_validator_supports_pass_key() -> None:
+    policy = ValidationPolicy()
+    validator = LLMValidator(
+        policy,
+        runner=lambda prompt_key, variables: DummyResponse(
+            ok=True,
+            content={"pass": True, "reason": "Spec-compliant response"},
+        ),
+    )
+
+    evidence = [
+        EvidenceSnippet(
+            text="A concise evidence snippet.",
+            url="https://example.edu/pass",
+            institution="Example",
+            score=0.5,
+        )
+    ]
+
+    result = validator.validate_concept(_concept(), evidence)
+    assert result.passed
+    assert result.confidence > 0.0
+
+
 def test_llm_validator_handles_failure() -> None:
     policy = ValidationPolicy()
     validator = LLMValidator(

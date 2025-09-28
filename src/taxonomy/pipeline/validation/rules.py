@@ -19,6 +19,8 @@ class RuleResult:
     hard_fail: bool
     findings: List[ValidationFinding]
     summary: str
+    hard_violations: List[str]
+    soft_violations: List[str]
 
 
 class RuleValidator:
@@ -41,9 +43,10 @@ class RuleValidator:
         if vocab_violation:
             violations.append(vocab_violation)
 
-        passed = not violations
-        hard_fail = self._is_hard_failure(violations)
-        findings = self._build_findings(concept, violations, passed)
+        hard_violations, soft_violations = self._partition_violations(violations)
+        passed = not hard_violations
+        hard_fail = self._is_hard_failure(hard_violations)
+        findings = self._build_findings(concept, hard_violations, soft_violations)
         summary = self._summarize(violations)
         return RuleResult(
             passed=passed,
@@ -51,6 +54,8 @@ class RuleValidator:
             hard_fail=hard_fail,
             findings=findings,
             summary=summary,
+            hard_violations=hard_violations,
+            soft_violations=soft_violations,
         )
 
     # -- internals -----------------------------------------------------------------
@@ -101,25 +106,37 @@ class RuleValidator:
     def _is_hard_failure(self, violations: Sequence[str]) -> bool:
         if not violations:
             return False
-        hard_prefixes = {"forbidden_pattern", "root_has_parents", "missing_parents", "invalid_level"}
+        hard_prefixes = {
+            "forbidden_pattern",
+            "root_has_parents",
+            "missing_parents",
+            "invalid_level",
+            "missing_required_vocab",
+        }
+        if self._settings.venue_detection_hard:
+            hard_prefixes.add("venue_name_detected")
         return any(violation.split(":", 1)[0] in hard_prefixes for violation in violations)
 
     def _build_findings(
-        self, concept: Concept, violations: Iterable[str], passed: bool
+        self,
+        concept: Concept,
+        hard_violations: Iterable[str],
+        soft_violations: Iterable[str],
     ) -> List[ValidationFinding]:
-        findings: List[ValidationFinding] = []
-        if passed:
-            findings.append(
+        hard_list = list(hard_violations)
+        soft_list = list(soft_violations)
+        if not hard_list and not soft_list:
+            return [
                 ValidationFinding(
                     concept_id=concept.id,
                     mode=FindingMode.RULE,
                     passed=True,
                     detail="All deterministic rule checks passed.",
                 )
-            )
-            return findings
+            ]
 
-        for violation in violations:
+        findings: List[ValidationFinding] = []
+        for violation in hard_list:
             findings.append(
                 ValidationFinding(
                     concept_id=concept.id,
@@ -128,9 +145,51 @@ class RuleValidator:
                     detail=f"Rule violation: {violation}",
                 )
             )
+        for violation in soft_list:
+            findings.append(
+                ValidationFinding(
+                    concept_id=concept.id,
+                    mode=FindingMode.RULE,
+                    passed=False,
+                    detail=f"Rule warning: {violation}",
+                )
+            )
         return findings
 
     def _summarize(self, violations: Sequence[str]) -> str:
         if not violations:
             return "Rule checks succeeded"
         return ", ".join(violations)
+
+    def _partition_violations(
+        self, violations: Sequence[str]
+    ) -> tuple[List[str], List[str]]:
+        if not violations:
+            return [], []
+
+        hard_prefixes = {
+            "forbidden_pattern",
+            "root_has_parents",
+            "missing_parents",
+            "invalid_level",
+            "missing_required_vocab",
+        }
+        forbidden_details = {
+            violation.split(":", 1)[1]
+            for violation in violations
+            if violation.startswith("forbidden_pattern:")
+        }
+
+        hard_violations: List[str] = []
+        soft_violations: List[str] = []
+        for violation in violations:
+            prefix, _, detail = violation.partition(":")
+            is_hard = prefix in hard_prefixes
+            if prefix == "venue_name_detected":
+                matches_forbidden = detail in forbidden_details if detail else False
+                is_hard = self._settings.venue_detection_hard or matches_forbidden
+            if is_hard:
+                hard_violations.append(violation)
+            else:
+                soft_violations.append(violation)
+        return hard_violations, soft_violations

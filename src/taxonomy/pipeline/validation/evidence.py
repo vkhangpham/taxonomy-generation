@@ -54,7 +54,7 @@ class EvidenceIndexer:
             haystacks = self._snapshots
         label_lower = concept_label.lower()
         results = [snap for snap in haystacks if label_lower in snap.text.lower()]
-        return results[: self._policy.evidence.max_snippets_per_concept or None]
+        return results
 
     def extract_snippets(
         self,
@@ -97,7 +97,8 @@ class EvidenceIndexer:
 
     def assess_authority(self, snapshot: PageSnapshot) -> float:
         domain = self._extract_domain(snapshot.canonical_url or snapshot.url)
-        if domain in self._authoritative_domains():
+        authoritative_domains = self._authoritative_domains()
+        if any(domain == auth or domain.endswith(f".{auth}") for auth in authoritative_domains):
             return 1.0
         if domain.endswith(".edu") or domain.endswith(".gov"):
             return 0.8
@@ -122,6 +123,10 @@ class EvidenceIndexer:
         if limit:
             return snippets[:limit]
         return snippets
+
+    def is_empty(self) -> bool:
+        self._ensure_built()
+        return not self._snapshots
 
     def _ensure_built(self) -> None:
         if not self._built:

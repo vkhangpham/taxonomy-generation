@@ -42,7 +42,7 @@ def validate_concepts(
     snapshot_paths = _normalize_paths(snapshots_path)
     snapshots = load_snapshots(snapshot_paths) if snapshot_paths else []
 
-    enable_web = mode in {"all", "web", "llm"}
+    enable_web = mode in {"all", "web"}
     enable_llm = mode in {"all", "llm"}
 
     processor = ValidationProcessor(

@@ -6,10 +6,11 @@ Purpose
 Core Tech
 - Rule validation: compiled regex/pattern engine and configurable vocabularies.
 - Web validation: Firecrawl v2.0 snapshots as the only web evidence source; no ad-hoc fetching.
-- LLM validation: DSPy-managed entailment prompts with strict JSON returns.
+- LLM validation: DSPy-managed entailment prompts with strict JSON `{pass, reason, confidence?}` responses (legacy `validated` keys are accepted but normalized).
 
 LLM Usage
 - LLM checks must go through the LLM package: `llm.run("validation.entailment", {claim, evidence})`.
+- Responses must include `{pass: bool, reason: str}`; `validated` remains a backward-compatible alias for `pass`.
 - The package resolves the active prompt from disk; inline prompts are prohibited.
 
 Inputs/Outputs (semantic)
@@ -17,21 +18,22 @@ Inputs/Outputs (semantic)
 - Output: ValidationFinding[] and an aggregated pass/fail per concept with rationale
 
 Modes
-- Rule: regex/vocabulary/structure checks; hard failures for forbidden patterns; soft warnings for style.
-- Web: confirm presence/consistency in authoritative pages (institutional sites, trusted catalogs); capture evidence snippets.
+- Rule: regex/vocabulary/structure checks; hard failures for forbidden patterns; soft warnings for style. Venue detections at L3 remain warnings by default, escalate automatically when the same pattern matches a forbidden rule, and can be forced to hard failures via `rules.venue_detection_hard=true`.
+- Web: confirm presence/consistency in authoritative pages (institutional sites, trusted catalogs); capture evidence snippets. Authority lists match both root domains and their subdomains. Snapshot timeouts or an empty index surface `unknown` results that record findings without casting a vote.
 - LLM: entailment-style check with strict JSON {pass, reason}; no free-form text.
 
 Aggregation Policy
 - Any hard rule failure → FAIL.
-- Otherwise weighted vote: Rule > Web > LLM; ties break toward conservative (fail) unless evidence strong.
+- Otherwise weighted vote: Rule > Web > LLM; conservative tie-breaks only flip to PASS when the evidence strength (max of web average snippet score and LLM confidence) meets `aggregation.tie_break_min_strength` (defaulting to the LLM confidence threshold).
 - Always record individual findings; expose reasons and evidence in final manifest.
+- Web checks marked `unknown` do not contribute weight to the tally.
 
 Failure Handling
-- If web fetch fails repeatedly, mark as unknown (neither pass nor fail) and do not block aggregation.
+- If web fetch fails repeatedly or the evidence index is empty, mark as unknown (neither pass nor fail) and do not block aggregation.
 - If LLM returns invalid JSON, retry with schema reminder; quarantine if repeated.
 
 Observability
-- Counters: checked, rule_failed, web_failed, llm_failed, passed_all.
+- Counters: checked, rule_failed, web_failed, llm_failed, passed_all (legacy `*_passed` counters remain for dashboards).
 - Evidence store: sampled snippets and URLs for audit.
 
 Acceptance Tests

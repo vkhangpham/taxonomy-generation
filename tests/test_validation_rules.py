@@ -54,3 +54,61 @@ def test_rule_validator_vocab_requirement() -> None:
     failed = validator.validate_concept(_concept("Applied Physics"))
     assert not failed.passed
     assert "missing_required_vocab:1" in failed.violations
+
+
+def test_venue_detection_is_soft_by_default() -> None:
+    policy = ValidationPolicy()
+    policy = policy.model_copy(update={
+        "rules": policy.rules.model_copy(
+            update={
+                "venue_patterns": ["neurips"],
+                "forbidden_patterns": [],
+            }
+        )
+    })
+    validator = RuleValidator(policy)
+
+    result = validator.validate_concept(_concept("NeurIPS", level=3))
+
+    assert result.passed
+    assert "venue_name_detected:neurips" in result.soft_violations
+    assert not result.hard_violations
+
+
+def test_venue_detection_toggle_escalates() -> None:
+    policy = ValidationPolicy()
+    policy = policy.model_copy(update={
+        "rules": policy.rules.model_copy(
+            update={
+                "venue_patterns": ["neurips"],
+                "venue_detection_hard": True,
+            }
+        )
+    })
+    validator = RuleValidator(policy)
+
+    result = validator.validate_concept(_concept("NeurIPS", level=3))
+
+    assert not result.passed
+    assert result.hard_fail
+    assert "venue_name_detected:neurips" in result.hard_violations
+
+
+def test_venue_detection_hardens_when_forbidden_matches() -> None:
+    policy = ValidationPolicy()
+    policy = policy.model_copy(update={
+        "rules": policy.rules.model_copy(
+            update={
+                "venue_patterns": ["neurips"],
+                "forbidden_patterns": ["neurips"],
+            }
+        )
+    })
+    validator = RuleValidator(policy)
+
+    result = validator.validate_concept(_concept("NeurIPS", level=3))
+
+    assert not result.passed
+    assert result.hard_fail
+    assert "forbidden_pattern:neurips" in result.hard_violations
+    assert "venue_name_detected:neurips" in result.hard_violations
