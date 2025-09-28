@@ -68,7 +68,16 @@ class LLMTokenVerifier:
                 error="LLM returned non-dict payload",
             )
 
-        passed = bool(response.get("pass"))
+        raw_pass = response.get("pass")
+        if isinstance(raw_pass, bool):
+            passed = raw_pass
+        elif isinstance(raw_pass, str):
+            passed = raw_pass.strip().lower() in {"true", "1", "yes"}
+        elif isinstance(raw_pass, (int, float)):
+            passed = bool(raw_pass)
+        else:
+            passed = False
+
         reason = str(response.get("reason", "")) or ("pass" if passed else "fail")
         return LLMVerificationResult(passed=passed, reason=reason, raw=response)
 

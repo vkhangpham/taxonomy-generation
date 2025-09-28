@@ -53,22 +53,24 @@ class InstitutionResolver:
     def resolve_identity(self, institution_name: str) -> str:
         """Return the canonical institution identifier for *institution_name*."""
 
-        if not institution_name:
+        trimmed_name = institution_name.strip() if institution_name else ""
+
+        if not trimmed_name:
             placeholder = self._placeholder_identifier("unknown", suffix="empty")
             logger.debug("Missing institution name encountered", placeholder=placeholder)
             return placeholder
 
-        if institution_name.strip().lower() == "unknown":
+        if trimmed_name.lower() == "unknown":
             return "placeholder::unknown"
 
-        key = self._normalize_key(institution_name)
+        key = self._normalize_key(trimmed_name)
         if key in self._cache:
             return self._cache[key]
 
         if key in self._canonical_index:
             result = self._canonical_index[key]
         else:
-            candidate = self._apply_campus_vs_system_rules(institution_name)
+            candidate = self._apply_campus_vs_system_rules(trimmed_name)
             result = normalize_whitespace(candidate)
         self._cache[key] = result
         return result

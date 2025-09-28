@@ -135,16 +135,19 @@ class CandidateAggregator:
                     primary_label=candidate.label,
                 )
                 buckets[key] = bucket
-            bucket.aliases.update(candidate.aliases)
+            alias_iterable = candidate.aliases or ()
+            bucket.aliases.update(alias_iterable)
             bucket.aliases.add(candidate.label)
             bucket.total_count += max(candidate.support.count, 0)
             bucket.total_records += max(candidate.support.records, 0)
 
-            canonical_institutions = {
-                self._resolver.resolve_identity(name)
-                for name in evidence.institutions
-                if name
-            }
+            canonical_institutions = set()
+            for name in evidence.institutions:
+                if not name:
+                    continue
+                resolved = self._resolver.resolve_identity(name)
+                if resolved:
+                    canonical_institutions.add(resolved)
             if not canonical_institutions:
                 canonical_institutions = {self._unknown_institution_placeholder}
             bucket.institutions.update(canonical_institutions)
