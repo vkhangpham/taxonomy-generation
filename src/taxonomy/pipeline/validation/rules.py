@@ -26,8 +26,23 @@ class RuleResult:
 class RuleValidator:
     """Apply deterministic validation rules to concepts."""
 
+    HARD_VIOLATION_PREFIXES: frozenset[str] = frozenset(
+        {
+            "forbidden_pattern",
+            "root_has_parents",
+            "missing_parents",
+            "invalid_level",
+            "missing_required_vocab",
+        }
+    )
+
     def __init__(self, policy: ValidationPolicy) -> None:
         self._settings = policy.rules
+        required_vocabularies = self._settings.required_vocabularies or {}
+        self._required_vocabularies = {
+            level: tuple(token.lower() for token in tokens if token)
+            for level, tokens in required_vocabularies.items()
+        }
         self._compile_patterns()
 
     def validate_concept(self, concept: Concept) -> RuleResult:
@@ -79,7 +94,7 @@ class RuleValidator:
         return violations
 
     def _check_vocabularies(self, concept: Concept) -> str | None:
-        required = self._settings.required_vocabularies.get(concept.level)
+        required = self._required_vocabularies.get(concept.level)
         if not required:
             return None
         label = concept.canonical_label.lower()
@@ -111,7 +126,22 @@ class RuleValidator:
         Policy-driven thresholds should be implemented at the policy layer rather
         than in this helper.
         """
-        return bool(violations)
+        if not violations:
+            return False
+
+        forbidden_details = {
+            violation.split(":", 1)[1]
+            for violation in violations
+            if violation.startswith("forbidden_pattern:")
+        }
+        for violation in violations:
+            prefix, _, detail = violation.partition(":")
+            if prefix == "venue_name_detected":
+                if self._venue_violation_is_hard(detail, forbidden_details):
+                    return True
+            elif prefix in self.HARD_VIOLATION_PREFIXES:
+                return True
+        return False
 
     def _build_findings(
         self,
@@ -193,13 +223,6 @@ class RuleValidator:
         if not violations:
             return [], []
 
-        hard_prefixes = {
-            "forbidden_pattern",
-            "root_has_parents",
-            "missing_parents",
-            "invalid_level",
-            "missing_required_vocab",
-        }
         forbidden_details = {
             violation.split(":", 1)[1]
             for violation in violations
@@ -213,7 +236,7 @@ class RuleValidator:
             if prefix == "venue_name_detected":
                 is_hard = self._venue_violation_is_hard(detail, forbidden_details)
             else:
-                is_hard = prefix in hard_prefixes
+                is_hard = prefix in self.HARD_VIOLATION_PREFIXES
 
             if is_hard:
                 hard_violations.append(violation)
