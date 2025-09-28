@@ -170,7 +170,7 @@ class DeduplicationProcessor:
         deduped = sorted(surviving.values(), key=lambda concept: concept.id)
         return deduped, merge_ops, samples
 
-    def process(self, concepts: Sequence[Concept]) -> DeduplicationResult:
+    def process(self, concepts: Iterable[Concept]) -> DeduplicationResult:
         """Run the deduplication pipeline for the provided concepts.
 
         Duplicate concept IDs are detected before processing. The processor keeps
@@ -182,16 +182,18 @@ class DeduplicationProcessor:
 
         with self._lock:
             start_time = perf_counter()
-            total_concepts = len(concepts)
-            _LOGGER.info("Deduplication run started", total_concepts=total_concepts)
-
-            self._reset_run_state()
             concept_lookup: Dict[str, Concept] = {}
             occurrence_counts: Dict[str, int] = {}
+            total_concepts = 0
+
             for concept in concepts:
+                total_concepts += 1
                 concept_lookup[concept.id] = concept
                 occurrence_counts[concept.id] = occurrence_counts.get(concept.id, 0) + 1
 
+            _LOGGER.info("Deduplication run started", total_concepts=total_concepts)
+
+            self._reset_run_state()
             duplicate_ids = {cid: count for cid, count in occurrence_counts.items() if count > 1}
             duplicates_detected = sum(count - 1 for count in duplicate_ids.values())
             unique_concepts = list(concept_lookup.values())

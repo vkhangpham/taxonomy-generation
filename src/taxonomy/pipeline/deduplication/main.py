@@ -9,6 +9,7 @@ from taxonomy.utils.logging import get_logger, logging_context
 
 from .io import (
     generate_dedup_metadata,
+    is_remote_path,
     load_concepts,
     write_deduplicated_concepts,
     write_merge_operations,
@@ -35,27 +36,53 @@ def deduplicate_concepts(
     policy = cfg.policies.deduplication
     processor = DeduplicationProcessor(policy)
 
-    concepts = load_concepts(concepts_path, level_filter=level_filter)
+    def _normalize_destination(raw: str | Path) -> str | Path:
+        """Expand local paths and ensure their parent directory exists."""
+
+        if is_remote_path(raw):
+            return str(raw)
+        path = Path(raw).expanduser()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        return path
+
+    def _swap_suffix(raw: str | Path, new_suffix: str) -> str | Path:
+        """Replace the suffix for local paths while preserving remotes."""
+
+        if is_remote_path(raw):
+            raw_str = str(raw)
+            slash_index = raw_str.rfind("/")
+            dot_index = raw_str.rfind(".")
+            if dot_index > slash_index:
+                return raw_str[:dot_index] + new_suffix
+            return raw_str + new_suffix
+        return Path(raw).with_suffix(new_suffix)
+
+    concept_stream = load_concepts(concepts_path, level_filter=level_filter)
+
+    with logging_context(stage="dedup", level=level_filter or "all"):
+        result = processor.process(concept_stream)
+
+    stats_input = result.stats.get("input", {})
     _LOGGER.info(
         "Loaded concepts",
-        count=len(concepts),
+        count=stats_input.get("total_concepts", 0),
+        unique_concepts=stats_input.get("unique_concepts", 0),
         level_filter=level_filter,
     )
 
-    with logging_context(stage="dedup", level=level_filter or "all"):
-        result = processor.process(concepts)
+    output_destination = _normalize_destination(output_path)
+    merge_target = merge_ops_path or _swap_suffix(output_destination, ".merge_ops.jsonl")
+    merge_destination_target = _normalize_destination(merge_target)
+    metadata_target_raw = metadata_path or _swap_suffix(output_destination, ".metadata.json")
+    metadata_target = _normalize_destination(metadata_target_raw)
 
-    destination = write_deduplicated_concepts(result.concepts, output_path)
-    merge_destination = write_merge_operations(
-        result.merge_ops,
-        merge_ops_path or Path(output_path).with_suffix(".merge_ops.jsonl"),
-    )
+    destination = write_deduplicated_concepts(result.concepts, output_destination)
+    merge_destination = write_merge_operations(result.merge_ops, merge_destination_target)
 
-    metadata_target = metadata_path or Path(output_path).with_suffix(".metadata.json")
     config_snapshot = {
         "policy_version": cfg.policies.policy_version,
         "merge_policy": policy.merge_policy,
-        "thresholds": policy.thresholds.model_dump(),
+        "thresholds": policy.thresholds.model_dump(mode="json"),
         "weights": {
             "jaro_winkler_weight": policy.jaro_winkler_weight,
             "jaccard_weight": policy.jaccard_weight,
@@ -83,7 +110,14 @@ def deduplicate_concepts(
 
 
 def _build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Run the concept deduplication pipeline")
+    """Build the argument parser for the deduplication CLI.
+
+    The parser expects positional paths for `concepts` and `output` along with
+    optional `--merge-ops`, `--metadata`, and `--level` flags to control run
+    destinations and filtering.
+    """
+
+    parser = argparse.ArgumentParser(description="Run the concept deduplication pipeline.")
     parser.add_argument("concepts", help="Path to input concepts JSONL (S3 output)")
     parser.add_argument("output", help="Destination JSONL for deduplicated concepts")
     parser.add_argument("--merge-ops", dest="merge_ops", help="Optional path for merge operations JSONL")
