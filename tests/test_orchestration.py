@@ -2,12 +2,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import os
+import time
 import pytest
 
 from taxonomy.config.settings import Settings
 from taxonomy.orchestration import TaxonomyOrchestrator, run_taxonomy_pipeline
 from taxonomy.orchestration.checkpoints import CheckpointManager
-
 
 def _build_settings(tmp_path: Path) -> Settings:
     overrides = {
@@ -135,3 +136,91 @@ def test_checkpoint_manager_records_artifact(tmp_path: Path):
     manager.record_artifact(dummy, kind="test")
     artifacts = list(manager.iter_artifacts())
     assert artifacts and artifacts[0]["kind"] == "test"
+
+
+def test_cleanup_checkpoints_no_files(tmp_path: Path):
+    manager = CheckpointManager("cleanup-empty", tmp_path)
+
+    removed, failures = manager.cleanup_checkpoints()
+
+    assert removed == []
+    assert failures == []
+
+
+def test_cleanup_checkpoints_respects_keep_and_ties(tmp_path: Path):
+    manager = CheckpointManager("cleanup-order", tmp_path)
+    older_a = manager.base_directory / "older_a.checkpoint.json"
+    older_b = manager.base_directory / "older_b.checkpoint.json"
+    newest = manager.base_directory / "newest.checkpoint.json"
+
+    for path in (older_a, older_b, newest):
+        path.write_text("{}", encoding="utf-8")
+
+    past = time.time() - 3600
+    os.utime(older_a, (past, past))
+    os.utime(older_b, (past, past))
+    now = time.time()
+    os.utime(newest, (now, now))
+
+    removed, failures = manager.cleanup_checkpoints(keep_latest_n=1)
+
+    assert [path.name for path in removed] == [
+        "older_a.checkpoint.json",
+        "older_b.checkpoint.json",
+    ]
+    assert failures == []
+    assert not older_a.exists()
+    assert not older_b.exists()
+    assert newest.exists()
+
+
+def test_cleanup_checkpoints_handles_stat_errors(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    manager = CheckpointManager("cleanup-stat-error", tmp_path)
+    good = manager.base_directory / "good.checkpoint.json"
+    bad = manager.base_directory / "bad.checkpoint.json"
+    for path in (good, bad):
+        path.write_text("{}", encoding="utf-8")
+
+    real_stat = Path.stat
+
+    def fake_stat(self: Path):
+        if self.name == bad.name:
+            raise OSError("stat boom")
+        return real_stat(self)
+
+    monkeypatch.setattr(Path, "stat", fake_stat)
+
+    removed, failures = manager.cleanup_checkpoints(keep_latest_n=0)
+
+    monkeypatch.setattr(Path, "stat", real_stat)
+
+    assert removed == [good]
+    assert failures == []
+    assert not good.exists()
+    assert bad.exists()
+
+
+def test_cleanup_checkpoints_dry_run_reports_candidates(tmp_path: Path):
+    manager = CheckpointManager("cleanup-dry-run", tmp_path)
+    old_file = manager.base_directory / "old.checkpoint.json"
+    fresh_file = manager.base_directory / "fresh.checkpoint.json"
+
+    for path in (old_file, fresh_file):
+        path.write_text("{}", encoding="utf-8")
+
+    now = time.time()
+    os.utime(old_file, (now - 120, now - 120))
+    os.utime(fresh_file, (now, now))
+
+    removed, failures = manager.cleanup_checkpoints(
+        keep_latest_n=0,
+        dry_run=True,
+        grace_period_s=60,
+    )
+
+    assert removed == [old_file]
+    assert failures == []
+    assert old_file.exists()
+    assert fresh_file.exists()

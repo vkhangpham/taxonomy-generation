@@ -10,6 +10,7 @@ from typing import Dict, Iterable, Optional, Sequence
 from taxonomy.utils.helpers import ensure_directory, serialize_json
 from taxonomy.utils.logging import get_logger
 
+import time
 _LOGGER = get_logger(module=__name__)
 
 
@@ -71,16 +72,98 @@ class CheckpointManager:
             return None
         return checkpoint.get("state")
 
-    def cleanup_checkpoints(self, keep_final: bool = True) -> None:
-        checkpoints = sorted(
-            self.base_directory.glob("*.checkpoint.json"),
-            key=lambda candidate: candidate.stat().st_mtime,
+    def cleanup_checkpoints(
+        self,
+        keep_latest_n: int = 1,
+        dry_run: bool = False,
+        grace_period_s: float = 0.0,
+    ) -> tuple[list[Path], list[tuple[Path, str]]]:
+        """Remove stale checkpoint files while respecting recency and guardrails.
+
+        Checkpoints are ordered by modification time (oldest first) and ties are
+        resolved by filename to guarantee deterministic behaviour. The newest
+        ``keep_latest_n`` checkpoints are retained, and any candidates newer than
+        ``grace_period_s`` seconds (relative to the current wall clock) are
+        preserved even if they exceed the retention limit. When ``dry_run`` is
+        true the method only reports what *would* be removed without unlinking
+        files. The return value contains the list of checkpoint paths selected
+        for deletion and a list of pairs describing paths that could not be
+        removed together with the associated error message.
+        """
+
+        checkpoint_entries: list[tuple[Path, float]] = []
+        for candidate in self.base_directory.glob("*.checkpoint.json"):
+            try:
+                stat_result = candidate.stat()
+            except OSError as error:
+                _LOGGER.warning(
+                    "Unable to stat checkpoint during cleanup",
+                    path=str(candidate),
+                    error=str(error),
+                    run_id=self.run_id,
+                )
+                continue
+            checkpoint_entries.append((candidate, stat_result.st_mtime))
+
+        checkpoint_entries.sort(key=lambda item: (item[1], item[0].name))
+        keep = max(keep_latest_n, 0)
+        if keep:
+            candidates = checkpoint_entries[:-keep]
+        else:
+            candidates = checkpoint_entries
+
+        now = time.time()
+        to_remove: list[Path] = []
+        for path, mtime in candidates:
+            if grace_period_s > 0 and (now - mtime) < grace_period_s:
+                _LOGGER.debug(
+                    "Skipping checkpoint within grace period",
+                    path=str(path),
+                    run_id=self.run_id,
+                    grace_period_s=grace_period_s,
+                )
+                continue
+            to_remove.append(path)
+
+        removed: list[Path] = []
+        failures: list[tuple[Path, str]] = []
+        for path in to_remove:
+            if dry_run:
+                _LOGGER.info(
+                    "Dry run - would remove checkpoint",
+                    path=str(path),
+                    run_id=self.run_id,
+                )
+                removed.append(path)
+                continue
+            try:
+                path.unlink(missing_ok=True)
+            except OSError as error:
+                failures.append((path, str(error)))
+                _LOGGER.error(
+                    "Failed to remove checkpoint",
+                    path=str(path),
+                    error=str(error),
+                    run_id=self.run_id,
+                )
+            else:
+                removed.append(path)
+                _LOGGER.info(
+                    "Removed checkpoint",
+                    path=str(path),
+                    run_id=self.run_id,
+                )
+
+        _LOGGER.info(
+            "Checkpoint cleanup finished",
+            run_id=self.run_id,
+            keep_latest_n=keep_latest_n,
+            dry_run=dry_run,
+            grace_period_s=grace_period_s,
+            removed=[str(path) for path in removed],
+            failures=[{"path": str(path), "error": error} for path, error in failures],
         )
-        if keep_final and checkpoints:
-            checkpoints = checkpoints[:-1]
-        for path in checkpoints:
-            path.unlink(missing_ok=True)
-        _LOGGER.info("Cleaned up checkpoints", run_id=self.run_id)
+        return removed, failures
 
     # ------------------------------------------------------------------
     # Artifact tracking
