@@ -5,7 +5,7 @@ import pytest
 
 from taxonomy.config.policies import ObservabilityPolicy
 from taxonomy.config.settings import Settings
-from taxonomy.observability import CounterRegistry, ObservabilityContext
+from taxonomy.observability import CounterRegistry, ObservabilityContext, stable_hash
 from taxonomy.orchestration.checkpoints import CheckpointManager
 from taxonomy.orchestration.manifest import RunManifest
 from taxonomy.orchestration.phases import PhaseManager
@@ -126,11 +126,15 @@ def test_phase_manager_emits_observability_events(tmp_path) -> None:
     assert any(op["operation"] == "complete" for op in data["operations"])
 
     manifest_data = manager._manifest.finalize()
-    assert manifest_data["observability"]["counters"]["S1"]["records_in"] == 4
-    assert manifest_data["observability"]["thresholds"]
+    observability_meta = manifest_data["observability"]
+    observability_path = Path(observability_meta["path"])
+    observability_payload = json.loads(observability_path.read_text(encoding="utf-8"))
+
+    assert observability_payload["counters"]["S1"]["records_in"] == 4
+    assert observability_payload["thresholds"]
     assert manifest_data["operation_logs"]
     assert manifest_data["evidence_samples"]
-    assert "checksum" in manifest_data["observability"]
+    assert observability_meta["checksum"] == stable_hash(observability_payload)
 
     # Ensure checkpoints were written
     checkpoint_path = manager._checkpoint_manager.checkpoint_path("phase1_level0")

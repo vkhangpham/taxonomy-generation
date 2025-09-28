@@ -3,9 +3,10 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from pathlib import Path
+import threading
 from typing import Any, Dict, Iterable, Mapping, Optional, TYPE_CHECKING
 
-from taxonomy.observability import ObservabilityContext, stable_hash
+from taxonomy.observability import stable_hash
 from taxonomy.utils.helpers import serialize_json
 from taxonomy.utils.logging import get_logger
 
@@ -13,6 +14,7 @@ if TYPE_CHECKING:  # pragma: no cover - typing convenience
     from taxonomy.config.policies import ObservabilityPolicy
     from taxonomy.config.settings import Settings
     from taxonomy.llm.registry import PromptRegistry
+    from taxonomy.observability import ObservabilityContext
     from taxonomy.observability.manifest import ObservabilityManifest
 
 _LOGGER = get_logger(module=__name__)
@@ -25,7 +27,7 @@ class RunManifest:
         self,
         run_id: str,
         *,
-        policy: "ObservabilityPolicy" | None = None,
+        policy: Optional[ObservabilityPolicy] = None,
     ) -> None:
         self.run_id = run_id
         self._policy = policy
@@ -44,11 +46,12 @@ class RunManifest:
             "prompt_versions": {},
             "checksums": {},
         }
-        self._observability: ObservabilityContext | None = None
+        self._observability: Optional[ObservabilityContext] = None
         self._observability_snapshot: Any | None = None
-        self._observability_manifest: ObservabilityManifest | None = None
+        self._observability_manifest: Optional[ObservabilityManifest] = None
         self._thresholds: Dict[str, Any] = {}
         self._seeds: Dict[str, int] = {}
+        self._observability_lock = threading.Lock()
 
     # ------------------------------------------------------------------
     # Collection helpers
@@ -58,21 +61,30 @@ class RunManifest:
         self._observability_snapshot = None
         self._observability_manifest = None
 
-    def _ensure_observability_manifest(self) -> "ObservabilityManifest | None":
+    def _ensure_observability_manifest(self) -> Optional[ObservabilityManifest]:
         if self._observability_manifest is not None:
             return self._observability_manifest
         if not self._observability:
             return None
 
-        policy = getattr(self._observability, "policy", None) or self._policy
-        manifest_enabled = True if policy is None else getattr(policy, "audit_trail_generation", True)
-        if not manifest_enabled:
-            return None
+        with self._observability_lock:
+            if self._observability_manifest is not None:
+                return self._observability_manifest
 
-        from taxonomy.observability.manifest import ObservabilityManifest
+            obs_policy = getattr(self._observability, "policy", None)
+            policy = obs_policy if obs_policy is not None else self._policy
+            manifest_enabled = True if policy is None else getattr(
+                policy,
+                "audit_trail_generation",
+                True,
+            )
+            if not manifest_enabled:
+                return None
 
-        self._observability_manifest = ObservabilityManifest(context=self._observability)
-        return self._observability_manifest
+            from taxonomy.observability.manifest import ObservabilityManifest
+
+            self._observability_manifest = ObservabilityManifest(context=self._observability)
+            return self._observability_manifest
 
     def collect_versions(self, *, settings: "Settings") -> None:
         self._data["versions"] = {
@@ -265,6 +277,7 @@ class RunManifest:
             return Path(metadata_dir).resolve()
         except (TypeError, OSError):  # pragma: no cover - defensive guard
             return None
+
     def _integrate_observability(self) -> None:
         if not self._observability:
             return
@@ -274,7 +287,24 @@ class RunManifest:
             return
 
         snapshot = manifest.snapshot()
-        exported = manifest.build_payload()
+        # Compute the snapshot once so downstream payload building reuses the
+        # captured state without triggering another potentially expensive pull.
+        exported = manifest.build_payload(snapshot)
+        exported_seeds = exported.get("seeds", {}) or {}
+        validated_seeds: Dict[str, int] = {}
+        for name, value in exported_seeds.items():
+            try:
+                coerced = int(value)
+            except (TypeError, ValueError):
+                _LOGGER.warning(
+                    "Skipping invalid observability seed; expected integer coercible value",
+                    run_id=self.run_id,
+                    seed_name=name,
+                    seed_value=value,
+                )
+                continue
+            validated_seeds[str(name)] = coerced
+        exported["seeds"] = dict(validated_seeds)
         self._observability_snapshot = snapshot
 
         metadata_dir = self._metadata_directory()
@@ -284,6 +314,8 @@ class RunManifest:
                 run_id=self.run_id,
             )
             metadata_dir = Path.cwd()
+        else:
+            metadata_dir.mkdir(parents=True, exist_ok=True)
 
         observability_path = serialize_json(
             exported,
@@ -316,7 +348,12 @@ class RunManifest:
             self._data.setdefault("prompt_versions", {}).update(prompt_versions)
 
         configuration = self._data.setdefault("configuration", {})
-        configuration.setdefault("seeds", {}).update(exported.get("seeds", {}))
+        if validated_seeds:
+            self._seeds.update(validated_seeds)
+            configuration.setdefault("seeds", {}).update(validated_seeds)
+            if self._observability:
+                for name, value in validated_seeds.items():
+                    self._observability.register_seed(name, value)
 
         thresholds = exported.get("thresholds", {})
         if thresholds:
