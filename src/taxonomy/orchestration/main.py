@@ -230,12 +230,17 @@ def main(argv: Iterable[str] | None = None) -> int:
 
     if args.command == "status":
         settings = Settings()
-        run_root = ensure_directory(Path(settings.paths.output_dir) / "runs")
-        checkpoint_dir = run_root / args.run_id / "checkpoints"
-        if not checkpoint_dir.exists():
+        run_root = Path(settings.paths.output_dir) / "runs"
+        run_directory = run_root / args.run_id
+        if not run_directory.exists():
             _LOGGER.info("No checkpoints found", run_id=args.run_id)
             return 0
-        for path in checkpoint_dir.glob("*.checkpoint.json"):
+        checkpoint_manager = CheckpointManager(args.run_id, run_directory)
+        checkpoint_paths = sorted(checkpoint_manager.base_directory.glob("*.checkpoint.json"))
+        if not checkpoint_paths:
+            _LOGGER.info("No checkpoints found", run_id=args.run_id)
+            return 0
+        for path in checkpoint_paths:
             _LOGGER.info("Checkpoint", path=str(path))
         return 0
 

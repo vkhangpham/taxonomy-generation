@@ -98,6 +98,13 @@ class HierarchyAssembler:
                     )
                     continue
                 if strategy == "attach_placeholder":
+                    if concept.level == 0:
+                        _LOGGER.warning(
+                            "Skipping placeholder attachment for root-level orphan",
+                            concept_id=concept.id,
+                            missing=missing,
+                        )
+                        continue
                     placeholder_parent = self._ensure_placeholder(concept.level - 1)
                     updated_parents = list(resolved_parents)
                     updated_parents.append(placeholder_parent)
