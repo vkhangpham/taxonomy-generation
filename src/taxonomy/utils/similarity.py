@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import inspect
 import math
 import re
 from functools import lru_cache
@@ -16,6 +17,14 @@ from .logging import get_logger, verbose_text_logging_enabled
 
 _NON_WORD_RE = re.compile(r"[^\w\s]+", re.UNICODE)
 _LOGGER = get_logger(module=__name__)
+_DEFAULT_PREFIX_WEIGHT = 0.1
+_MAX_PREFIX_LENGTH = 4
+_PREFIX_WEIGHT_CAP = 0.25
+
+try:
+    _JARO_WINKLER_SUPPORTS_PREFIX = "prefix_weight" in inspect.signature(jellyfish.jaro_winkler_similarity).parameters
+except (ValueError, TypeError):  # pragma: no cover - defensive
+    _JARO_WINKLER_SUPPORTS_PREFIX = False
 
 
 def _ordered_pair(text1: str, text2: str) -> Tuple[str, str]:
@@ -127,13 +136,45 @@ def token_jaccard_similarity(text1: str, text2: str) -> float:
     return score
 
 
+def _matched_prefix_length(text1: str, text2: str) -> int:
+    prefix = 0
+    for ch1, ch2 in zip(text1, text2):
+        if ch1 != ch2 or prefix >= _MAX_PREFIX_LENGTH:
+            break
+        prefix += 1
+    return prefix
+
+
 @lru_cache(maxsize=4096)
-def _jaro_winkler_cached(text1: str, text2: str) -> float:
-    ordered_a, ordered_b = _ordered_pair(text1, text2)
-    return jellyfish.jaro_winkler_similarity(ordered_a, ordered_b)
+def _jaro_winkler_cached(text1: str, text2: str, prefix_weight: float) -> float:
+    if _JARO_WINKLER_SUPPORTS_PREFIX:
+        return jellyfish.jaro_winkler_similarity(text1, text2, prefix_weight=prefix_weight)
+
+    # Jellyfish 1.2+ exposes `long_tolerance` but not `prefix_weight`. When callers
+    # request the default scaling we can rely on the built-in implementation.
+    if math.isclose(prefix_weight, _DEFAULT_PREFIX_WEIGHT, rel_tol=1e-9, abs_tol=0.0):
+        return jellyfish.jaro_winkler_similarity(text1, text2)
+
+    # Reconstruct Winkler boosting using the requested prefix weight while
+    # delegating the base Jaro distance to jellyfish for performance.
+    base_score = jellyfish.jaro_similarity(text1, text2)
+    prefix = _matched_prefix_length(text1, text2)
+    capped_weight = min(max(prefix_weight, 0.0), _PREFIX_WEIGHT_CAP)
+    boosted = base_score + prefix * capped_weight * (1.0 - base_score)
+    if boosted > 1.0:
+        boosted = 1.0
+    _LOGGER.debug(
+        "Applied manual Winkler boost",
+        prefix_weight=prefix_weight,
+        capped_weight=capped_weight,
+        prefix_length=prefix,
+        base_score=base_score,
+        boosted_score=boosted,
+    )
+    return boosted
 
 
-def jaro_winkler_similarity(text1: str, text2: str, *, prefix_weight: float = 0.1) -> float:
+def jaro_winkler_similarity(text1: str, text2: str, *, prefix_weight: float = _DEFAULT_PREFIX_WEIGHT) -> float:
     """Compute the Jaro-Winkler similarity between two strings."""
 
     normalized_1 = preprocess_for_similarity(text1)
@@ -142,7 +183,8 @@ def jaro_winkler_similarity(text1: str, text2: str, *, prefix_weight: float = 0.
         return 1.0
     if not normalized_1 or not normalized_2:
         return 0.0
-    score = _jaro_winkler_cached(normalized_1, normalized_2)
+    ordered_1, ordered_2 = _ordered_pair(normalized_1, normalized_2)
+    score = _jaro_winkler_cached(ordered_1, ordered_2, prefix_weight)
     _LOGGER.debug(
         "Computed Jaro-Winkler similarity",
         score=score,
