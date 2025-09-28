@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
-from typing import Dict, Iterable, List, Optional
+from typing import Dict, Iterable, List, Optional, Tuple
 
-from ...config.policies import ValidationPolicy
+from ...config.policies import ValidationAggregationSettings, ValidationPolicy
 from ...entities.core import ValidationFinding
 from .rules import RuleResult
 from .web import WebResult
@@ -28,6 +29,7 @@ class ValidationAggregator:
 
     def __init__(self, policy: ValidationPolicy) -> None:
         self._policy = policy
+        self._validate_weights(policy.aggregation)
 
     def aggregate(
         self,
@@ -70,17 +72,19 @@ class ValidationAggregator:
             scores["web"] = 0.0
 
         if llm_result is not None:
-            total_weight += weights.llm_weight
-            scores["llm"] = weights.llm_weight if llm_result.passed else 0.0
-            if llm_result.passed:
-                vote_weight += weights.llm_weight
+            llm_unknown = bool(getattr(llm_result, "unknown", False))
+            if not llm_unknown:
+                total_weight += weights.llm_weight
+                scores["llm"] = weights.llm_weight if llm_result.passed else 0.0
+                if llm_result.passed:
+                    vote_weight += weights.llm_weight
+            else:
+                scores["llm"] = 0.0
         else:
             scores["llm"] = 0.0
 
-        threshold = total_weight / 2.0 if total_weight else 0.0
-        passed = vote_weight > threshold
-        tie = total_weight > 0.0 and vote_weight == threshold
-        if tie:
+        passed, is_tie = self._compare_vote_to_threshold(vote_weight, total_weight)
+        if is_tie:
             if not weights.tie_break_conservative:
                 passed = True
             else:
@@ -138,5 +142,37 @@ class ValidationAggregator:
             if scores:
                 web_strength = sum(scores) / len(scores)
 
-        llm_strength = llm_result.confidence if llm_result is not None else 0.0
+        if llm_result is not None and not bool(getattr(llm_result, "unknown", False)):
+            llm_strength = llm_result.confidence
+        else:
+            llm_strength = 0.0
         return max(web_strength, llm_strength)
+
+    @staticmethod
+    def _compare_vote_to_threshold(
+        vote_weight: float, total_weight: float
+    ) -> Tuple[bool, bool]:
+        if total_weight <= 0.0:
+            return False, False
+        threshold = total_weight / 2.0
+        is_tie = math.isclose(vote_weight, threshold, rel_tol=1e-9, abs_tol=1e-9)
+        if vote_weight > threshold and not is_tie:
+            return True, False
+        if is_tie:
+            return False, True
+        return False, False
+
+    @staticmethod
+    def _validate_weights(weights: ValidationAggregationSettings) -> None:
+        values = {
+            "rule_weight": weights.rule_weight,
+            "web_weight": weights.web_weight,
+            "llm_weight": weights.llm_weight,
+        }
+        for name, value in values.items():
+            if value < 0 or not math.isfinite(value):
+                raise ValueError(f"{name} must be non-negative and finite")
+
+        min_strength = weights.tie_break_min_strength
+        if min_strength is not None and (min_strength < 0 or not math.isfinite(min_strength)):
+            raise ValueError("tie_break_min_strength must be non-negative and finite when provided")
