@@ -262,8 +262,8 @@ class RunManifest:
         if not metadata_dir:
             return None
         try:
-            return Path(metadata_dir)
-        except TypeError:  # pragma: no cover - defensive guard
+            return Path(metadata_dir).resolve()
+        except (TypeError, OSError):  # pragma: no cover - defensive guard
             return None
     def _integrate_observability(self) -> None:
         if not self._observability:
@@ -289,11 +289,12 @@ class RunManifest:
             exported,
             metadata_dir / f"{self.run_id}.observability.json",
         )
+        resolved_path = observability_path.resolve()
         self._data["observability"] = {
-            "path": str(observability_path),
+            "path": str(resolved_path),
             "checksum": stable_hash(exported),
         }
-        self.add_artifact(observability_path, kind="observability")
+        self.add_artifact(resolved_path, kind="observability")
 
         evidence_samples: list[Dict[str, Any]] = []
         for phase, samples in exported.get("evidence", {}).get("samples", {}).items():
