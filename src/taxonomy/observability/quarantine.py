@@ -95,5 +95,16 @@ class QuarantineManager:
     def __repr__(self) -> str:  # pragma: no cover - debugging helper
         with self._lock:
             total = len(self._items)
-            reasons = dict(self._reason_counts)
+            reason_counts = dict(self._reason_counts)
+        if reason_counts:
+            ordered_keys = stable_sorted(
+                reason_counts, key=lambda reason: (-reason_counts[reason], reason)
+            )
+            top_keys = ordered_keys[:5]
+            reasons = {reason: reason_counts[reason] for reason in top_keys}
+            remaining_total = sum(reason_counts[reason] for reason in ordered_keys[5:])
+            if remaining_total:
+                reasons["others"] = remaining_total
+        else:
+            reasons = {}
         return f"QuarantineManager(total={total}, reasons={reasons})"
