@@ -1,4 +1,7 @@
-"""Coordinator for the S1 extraction + normalization pipeline."""
+"""Coordinator for the S1 extraction + normalization pipeline.
+
+Unresolved parent anchors are tagged with the `UNRESOLVED:` prefix so downstream
+consumers can distinguish resolved identifiers from raw anchors."""
 
 from __future__ import annotations
 
@@ -90,8 +93,8 @@ class S1Processor:
             if matches:
                 resolved.extend(matches)
             else:
-                unresolved.append(anchor)
-        parent_values = resolved if resolved else unresolved
+                unresolved.append(f"UNRESOLVED:{normalize_whitespace(anchor)}")
+        parent_values = resolved + unresolved
         cleaned = [normalize_whitespace(value) for value in parent_values if value]
         return tuple(dict.fromkeys(cleaned))
 

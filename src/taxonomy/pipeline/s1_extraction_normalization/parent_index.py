@@ -29,10 +29,14 @@ class ParentIndex:
         self,
         *,
         label_policy: LabelPolicy,
-        similarity_cutoff: float = 0.86,
+        similarity_cutoff: float | None = None,
     ) -> None:
         self._policy = label_policy
-        self._similarity_cutoff = similarity_cutoff
+        self._similarity_cutoff = (
+            similarity_cutoff
+            if similarity_cutoff is not None
+            else label_policy.parent_similarity_cutoff
+        )
         self._entries: Dict[str, List[ParentEntry]] = {}
         self._cache: Dict[Tuple[str, int], List[str]] = {}
         self._unresolved: Dict[int, List[str]] = {}

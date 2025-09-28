@@ -172,6 +172,8 @@ class ExtractionProcessor:
                     source=record,
                 )
             )
+        # Defensive sort ensures deterministic downstream ordering.
+        results.sort(key=lambda entry: entry.normalized.lower())
         return results
 
 

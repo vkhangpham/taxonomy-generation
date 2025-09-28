@@ -47,7 +47,10 @@ def extract_candidates(
     label_policy = cfg.policies.label_policy
     extractor = ExtractionProcessor()
     normalizer = CandidateNormalizer(label_policy=label_policy)
-    parent_index = ParentIndex(label_policy=label_policy)
+    parent_index = ParentIndex(
+        label_policy=label_policy,
+        similarity_cutoff=label_policy.parent_similarity_cutoff,
+    )
     processor = S1Processor(
         extractor=extractor,
         normalizer=normalizer,
@@ -58,10 +61,13 @@ def extract_candidates(
     if previous_parents:
         parent_index.build_index(previous_parents)
 
-    total_records = sum(1 for _ in load_source_records(source_records_path))
+    total_records: int | None = None
+    if cfg.observability.precount_s1_records:
+        total_records = sum(1 for _ in load_source_records(source_records_path))
+
     resume_path = Path(resume_from) if resume_from is not None else None
     processed_records, aggregated_state = _load_resume_checkpoint(resume_path)
-    if processed_records > total_records:
+    if total_records is not None and processed_records > total_records:
         processed_records = total_records
 
     remaining_records = _skip_records(load_source_records(source_records_path), processed_records)

@@ -116,6 +116,10 @@ class PipelineObservabilityConfig(BaseModel):
 
     quarantine_enabled: bool = Field(default=False)
     quarantine_dir: Path | None = Field(default=None)
+    precount_s1_records: bool = Field(
+        default=True,
+        description="Precompute record counts for S1 extraction progress logging.",
+    )
 
     def resolve_directory(self, paths: PathsConfig) -> Path | None:
         """Resolve the on-disk location for quarantine artefacts."""

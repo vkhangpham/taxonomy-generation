@@ -59,6 +59,12 @@ class LabelPolicy(BaseModel):
         default=False,
         description="Whether ambiguous acronym expansions (e.g. AI) should be emitted.",
     )
+    parent_similarity_cutoff: float = Field(
+        default=0.86,
+        ge=0.0,
+        le=1.0,
+        description="Minimum similarity score for fuzzy parent matching.",
+    )
 
 
 class InstitutionPolicy(BaseModel):

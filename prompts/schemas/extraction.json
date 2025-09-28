@@ -40,9 +40,8 @@
         "default": []
       }
     },
-    "required": ["label", "normalized", "parents"],
+    "required": ["label", "normalized", "aliases", "parents"],
     "additionalProperties": false
   },
-  "uniqueItems": true,
   "description": "Array sorted by lowercase normalized label for deterministic output"
 }
