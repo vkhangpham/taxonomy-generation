@@ -68,6 +68,28 @@ def fake_llm_response() -> LLMResponse:
     return LLMResponse.success(content, json.dumps(content), TokenUsage(), {}, 0.01)
 
 
+def fake_duplicate_parent_response() -> LLMResponse:
+    content = {
+        "separable": True,
+        "confidence": 0.9,
+        "senses": [
+            {
+                "label": "Research",
+                "gloss": "Focus on research programs",
+                "parent_hints": ["p1"],
+                "evidence_indices": [0],
+            },
+            {
+                "label": "Teaching",
+                "gloss": "Focus on teaching curriculum",
+                "parent_hints": ["p1"],
+                "evidence_indices": [1],
+            },
+        ],
+    }
+    return LLMResponse.success(content, json.dumps(content), TokenUsage(), {}, 0.01)
+
+
 def test_ambiguity_detector_flags_divergent_parents():
     policy = DisambiguationPolicy(min_context_overlap_threshold=0.6)
     detector = AmbiguityDetector(policy)
@@ -235,3 +257,34 @@ def test_disambiguation_processor_creates_split_ops():
     assert total_records == aggregated_support
     assert total_counts == aggregated_support_counts
     assert total_institutions == aggregated_institutions
+
+
+def test_disambiguation_processor_defers_duplicate_parent_lineage():
+    policy = DisambiguationPolicy(min_context_overlap_threshold=0.6)
+    disambiguator = LLMDisambiguator(
+        policy,
+        runner=lambda *_: fake_duplicate_parent_response(),
+    )
+    processor = DisambiguationProcessor(policy, disambiguator=disambiguator)
+
+    concept_a = make_concept("a", ["p1"])
+    concept_b = make_concept("b", ["p2"])
+
+    context_index = {
+        "a": [make_record("Machine Learning research initiative", "inst1")],
+        "b": [make_record("Machine Learning teaching center", "inst2")],
+    }
+
+    outcome = processor.process([concept_a, concept_b], context_index)
+
+    assert not outcome.split_ops
+    assert set(outcome.deferred) == {"a", "b"}
+
+    rationale_lookup = {concept.id: concept.rationale for concept in outcome.concepts}
+    for concept_id in ("a", "b"):
+        rationale = rationale_lookup[concept_id]
+        assert rationale is not None
+        assert rationale.passed_gates["disambiguation"] is False
+        assert any(
+            "multi-parent" in reason.lower() for reason in rationale.reasons
+        )

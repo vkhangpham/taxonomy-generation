@@ -156,6 +156,34 @@ class DisambiguationProcessor:
             parent_mappings = self._disambiguator.map_senses_to_parents(
                 llm_result.senses, candidate.concepts
             )
+            if not self._policy.allow_multi_parent_exceptions:
+                seen_lineages: dict[frozenset[str], str] = {}
+                conflict_labels: tuple[str, str] | None = None
+                conflict_parents: frozenset[str] | None = None
+                for sense in llm_result.senses:
+                    parents = parent_mappings.get(sense.label, [])
+                    lineage_key = frozenset(parents)
+                    existing_label = seen_lineages.get(lineage_key)
+                    if existing_label is not None:
+                        conflict_labels = (existing_label, sense.label)
+                        conflict_parents = lineage_key
+                        break
+                    seen_lineages[lineage_key] = sense.label
+                if conflict_labels is not None:
+                    parent_list = sorted(conflict_parents) if conflict_parents else []
+                    parents_display = ", ".join(parent_list) if parent_list else "<root>"
+                    reason = (
+                        "Deferred split: multiple senses share parent lineage "
+                        f"{parents_display} and policy forbids multi-parent "
+                        f"exceptions ({conflict_labels[0]} vs {conflict_labels[1]})."
+                    )
+                    for concept in candidate.concepts:
+                        if concept.id in concept_map:
+                            self._mark_deferred(concept_map[concept.id], reason)
+                            deferred.append(concept.id)
+                    self.stats["deferred"] += 1
+                    continue
+
             evidence_mapping = {
                 sense.label: sense.evidence_indices for sense in llm_result.senses
             }
