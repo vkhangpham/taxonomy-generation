@@ -5,10 +5,12 @@ from __future__ import annotations
 import copy
 import hashlib
 from dataclasses import dataclass
-from typing import Dict, Iterable, List, Mapping, Sequence, Tuple
+from typing import Any, Dict, List, Mapping, Sequence
 
 from ...config.policies import DisambiguationPolicy
 from ...entities.core import Concept, Rationale, SplitOp, SupportStats
+from ...utils import summarize_contexts_for_llm
+from ...utils.context_features import ContextWindow
 from .llm import LLMSenseDefinition
 
 
@@ -30,20 +32,30 @@ class ConceptSplitter:
     def split(
         self,
         source_concept: Concept,
+        concept_group: Sequence[Concept],
         senses: Sequence[LLMSenseDefinition],
         parent_mappings: Mapping[str, Sequence[str]],
         evidence_mapping: Mapping[str, Sequence[int]] | None,
         confidence: float,
+        context_lookup: Mapping[str, Sequence[ContextWindow]] | None = None,
     ) -> SplitDecision:
+        combined_source = self._combine_source_concepts(source_concept, concept_group)
         new_ids = self.generate_split_ids(source_concept, len(senses))
         weights = self._compute_weights(senses, evidence_mapping)
+        support_shares = self.distribute_support_stats(
+            combined_source.support,
+            len(senses),
+            weights,
+        )
         new_concepts = self.create_sense_concepts(
-            source_concept,
+            combined_source,
             senses,
             parent_mappings,
             new_ids,
-            weights,
+            support_shares,
         )
+
+        exemplar_lookup = self._build_exemplar_lookup(concept_group, context_lookup)
         split_op = SplitOp(
             source_id=source_concept.id,
             new_ids=[concept.id for concept in new_concepts],
@@ -56,6 +68,11 @@ class ConceptSplitter:
                         "gloss": sense.gloss,
                         "parent_hints": sense.parent_hints,
                         "evidence_indices": list(sense.evidence_indices),
+                        "exemplars": [
+                            copy.deepcopy(exemplar_lookup[index])
+                            for index in sense.evidence_indices
+                            if index in exemplar_lookup
+                        ],
                     }
                     for sense in senses
                 ],
@@ -77,17 +94,19 @@ class ConceptSplitter:
         senses: Sequence[LLMSenseDefinition],
         parent_mappings: Mapping[str, Sequence[str]],
         new_ids: Sequence[str],
-        weights: Sequence[float],
+        support_shares: Sequence[SupportStats],
     ) -> List[Concept]:
-        support_shares = self.distribute_support_stats(
-            source_concept.support, len(senses), weights
-        )
         sense_concepts: List[Concept] = []
         for index, (sense, new_id) in enumerate(zip(senses, new_ids)):
             parents = list(parent_mappings.get(sense.label, source_concept.parents))
             aliases = self.manage_aliases(source_concept, sense)
             support = support_shares[index]
-            rationale = self.build_rationale(source_concept, sense, new_id)
+            rationale = self.build_rationale(
+                source_concept.rationale,
+                source_concept,
+                sense,
+                new_id,
+            )
             validation_metadata = copy.deepcopy(source_concept.validation_metadata)
             disambiguation_meta = validation_metadata.setdefault("disambiguation", {})
             disambiguation_meta[new_id] = {
@@ -185,11 +204,14 @@ class ConceptSplitter:
 
     def build_rationale(
         self,
+        template: Rationale,
         source_concept: Concept,
         sense: LLMSenseDefinition,
         new_id: str,
     ) -> Rationale:
-        rationale = Rationale.model_validate(source_concept.rationale.model_dump())
+        if not isinstance(template, Rationale):
+            template = Rationale()
+        rationale = Rationale.model_validate(template.model_dump())
         rationale.passed_gates["disambiguation"] = True
         rationale.reasons.append(
             f"Split '{source_concept.id}' into '{new_id}' due to distinct sense '{sense.label}'."
@@ -208,6 +230,114 @@ class ConceptSplitter:
         if sense_label.lower() in source_concept.canonical_label.lower():
             return source_concept.canonical_label
         return f"{source_concept.canonical_label} - {sense_label}"
+
+    def _combine_source_concepts(
+        self,
+        primary: Concept,
+        concept_group: Sequence[Concept],
+    ) -> Concept:
+        if not concept_group:
+            return primary.model_copy(deep=True)
+
+        combined = primary.model_copy(deep=True)
+
+        alias_set = {primary.canonical_label.strip(), *primary.aliases}
+        total_records = 0
+        total_institutions = 0
+        total_count = 0
+        rationales: List[Rationale] = []
+
+        for concept in concept_group:
+            alias_set.add(concept.canonical_label.strip())
+            alias_set.update(alias.strip() for alias in concept.aliases)
+            total_records += concept.support.records
+            total_institutions += concept.support.institutions
+            total_count += concept.support.count
+            rationales.append(concept.rationale)
+
+        alias_set.discard(combined.canonical_label)
+        combined.aliases = sorted(alias for alias in alias_set if alias)
+        combined.support = SupportStats(
+            records=total_records,
+            institutions=total_institutions,
+            count=total_count,
+        )
+        combined.rationale = self._merge_rationales(rationales)
+        return combined
+
+    def _merge_rationales(self, rationales: Sequence[Rationale]) -> Rationale:
+        merged = Rationale()
+        seen_reasons: set[str] = set()
+        for rationale in rationales:
+            if not isinstance(rationale, Rationale):
+                continue
+            for gate, value in rationale.passed_gates.items():
+                if gate not in merged.passed_gates:
+                    merged.passed_gates[gate] = bool(value)
+                else:
+                    merged.passed_gates[gate] = merged.passed_gates[gate] and bool(value)
+
+            for reason in rationale.reasons:
+                cleaned = reason.strip()
+                if cleaned and cleaned not in seen_reasons:
+                    merged.reasons.append(cleaned)
+                    seen_reasons.add(cleaned)
+
+            for key, threshold in rationale.thresholds.items():
+                if key not in merged.thresholds:
+                    merged.thresholds[key] = float(threshold)
+                else:
+                    merged.thresholds[key] = max(merged.thresholds[key], float(threshold))
+
+        return merged
+
+    def _build_exemplar_lookup(
+        self,
+        concept_group: Sequence[Concept],
+        context_lookup: Mapping[str, Sequence[ContextWindow]] | None,
+    ) -> Dict[int, Dict[str, Any]]:
+        if not context_lookup:
+            return {}
+
+        exemplar_lookup: Dict[int, Dict[str, Any]] = {}
+        per_parent_limit = self._policy.max_contexts_per_parent
+        if per_parent_limit <= 0:
+            max_contexts = self._policy.max_contexts_for_prompt
+        else:
+            max_contexts = min(
+                self._policy.max_contexts_for_prompt,
+                per_parent_limit,
+            )
+        index = 0
+
+        for concept in concept_group:
+            contexts = context_lookup.get(concept.id)
+            if not contexts:
+                continue
+
+            summarized = summarize_contexts_for_llm(contexts, max_contexts=max_contexts)
+            for payload in summarized:
+                entry: Dict[str, Any] = {
+                    "index": index,
+                    "concept_id": concept.id,
+                    "text": payload.get("text", ""),
+                    "institution": payload.get("institution", ""),
+                    "parent_lineage": payload.get("parent_lineage", ""),
+                    "source_index": payload.get("source_index", ""),
+                }
+                extras = {
+                    key: value
+                    for key, value in payload.items()
+                    if key
+                    not in {"text", "institution", "parent_lineage", "source_index"}
+                    and value
+                }
+                if extras:
+                    entry["metadata"] = extras
+                exemplar_lookup[index] = entry
+                index += 1
+
+        return exemplar_lookup
 
 
 __all__ = [

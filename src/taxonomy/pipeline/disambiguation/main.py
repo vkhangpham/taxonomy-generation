@@ -20,6 +20,15 @@ from .io import (
 from .processor import DisambiguationOutcome, DisambiguationProcessor
 
 
+
+
+def _sibling_with_suffix(path: Path, suffix: str) -> Path:
+    """Return a sibling file with the requested suffix, even when the original has none."""
+    path = Path(path)
+    if path.suffix:
+        return path.with_suffix(suffix)
+    return path.with_name(f"{path.name}{suffix}")
+
 def disambiguate_concepts(
     concepts_path: str | Path,
     output_path: str | Path,
@@ -36,8 +45,9 @@ def disambiguate_concepts(
     processor = DisambiguationProcessor(policy)
     outcome = processor.process(concepts, context_data)
 
+    output_path = Path(output_path)
     write_disambiguated_concepts(outcome.concepts, output_path)
-    split_path = Path(output_path).with_suffix(".splits.jsonl")
+    split_path = _sibling_with_suffix(output_path, ".splits.jsonl")
     write_split_operations(outcome.split_ops, split_path)
 
     metadata = generate_disambiguation_metadata(
@@ -45,7 +55,7 @@ def disambiguate_concepts(
         policy.model_dump(mode="json"),
         {op.source_id: op.new_ids for op in outcome.split_ops},
     )
-    metadata_path = Path(output_path).with_suffix(".metadata.json")
+    metadata_path = _sibling_with_suffix(output_path, ".metadata.json")
     ensure_directory(metadata_path.parent)
     with metadata_path.open("w", encoding="utf-8") as handle:
         json.dump(metadata, handle, indent=2)
