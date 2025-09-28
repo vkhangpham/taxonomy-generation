@@ -207,30 +207,44 @@ class Concept(BaseModel):
         return cleaned
 
     def set_validation_passed(self, passed: bool | None, *, gate: str = "validation") -> None:
-        """Update validation result and keep rationale in sync with a single source of truth."""
+        """Record the outcome for a validation gate.
 
-        # Ensure we have a Rationale to work with
-        rationale = self.rationale or Rationale()
-        if rationale.passed_gates is None:
-            rationale.passed_gates = {}
-        gate_results = rationale.passed_gates
+        Passing ``None`` removes the stored result for ``gate`` so that it no longer
+        influences the aggregate decision. When at least one gate remains,
+        ``validation_passed`` becomes the boolean result of ``all`` existing gate
+        values; if no gates remain it resets to ``None``. The rationale object is
+        mutated in place so callers keep a single, shared decision trail.
 
-        # Update or clear the specific gate result
+        Args:
+            passed: Gate outcome, or ``None`` to clear a previous value.
+            gate: Name of the gate whose result is being recorded.
+
+        Raises:
+            ValueError: If ``gate`` is missing or ``self.rationale`` is unset.
+        """
+
+        if not isinstance(gate, str):
+            raise ValueError("gate must be a non-empty string")
+        gate = gate.strip()
+        if not gate:
+            raise ValueError("gate must be a non-empty string")
+
+        if self.rationale is None:
+            raise ValueError("Concept.rationale must be initialized before updating validation results")
+
+        passed_gates = self.rationale.passed_gates
+        if passed_gates is None:
+            passed_gates = self.rationale.passed_gates = {}
+
         if passed is None:
-            gate_results.pop(gate, None)
+            passed_gates.pop(gate, None)
         else:
-            gate_results[gate] = passed
+            passed_gates[gate] = bool(passed)
 
-        # Recompute the overall validation flag based on all gate outcomes
-        if not gate_results:
+        if not passed_gates:
             self.validation_passed = None
-        elif all(gate_results.values()):
-            self.validation_passed = True
         else:
-            self.validation_passed = False
-
-        # Persist any newly created Rationale
-        self.rationale = rationale
+            self.validation_passed = all(passed_gates.values())
 
     def validate_hierarchy(self, parent_concepts: Sequence["Concept"] | None = None) -> None:
         """Validate hierarchy invariants.
