@@ -286,78 +286,230 @@ class RunManifest:
         if manifest is None:
             return
 
-        snapshot = manifest.snapshot()
-        # Compute the snapshot once so downstream payload building reuses the
-        # captured state without triggering another potentially expensive pull.
-        exported = manifest.build_payload(snapshot)
-        exported_seeds = exported.get("seeds", {}) or {}
+        with self._observability_lock:
+            try:
+                snapshot = manifest.snapshot()
+                payload = manifest.build_payload(snapshot)
+            except Exception as exc:  # pragma: no cover - defensive guard
+                _LOGGER.exception(
+                    "Observability payload generation failed for run %s; skipping integration (%s)",
+                    self.run_id,
+                    exc,
+                )
+                return
+            self._observability_snapshot = snapshot
+
+        if isinstance(payload, Mapping):
+            exported: Dict[str, Any] = dict(payload)
+        else:
+            try:
+                exported = dict(payload)  # type: ignore[arg-type]
+            except (TypeError, ValueError):
+                _LOGGER.error(
+                    "Observability payload for run %s is not mapping-compatible; using empty payload (type=%s)",
+                    self.run_id,
+                    type(payload).__name__,
+                )
+                exported = {}
+            else:
+                _LOGGER.warning(
+                    "Observability payload for run %s is not a mapping; coerced to dict via dict() (type=%s)",
+                    self.run_id,
+                    type(payload).__name__,
+                )
+
+        exported_seeds_obj = exported.get("seeds", {}) if isinstance(exported, Mapping) else {}
+        if isinstance(exported_seeds_obj, Mapping):
+            seed_items = exported_seeds_obj.items()
+        else:
+            _LOGGER.warning(
+                "Observability seeds payload for run %s is not mapping-compatible; skipping seed coercion (type=%s)",
+                self.run_id,
+                type(exported_seeds_obj).__name__,
+            )
+            seed_items = []
+
         validated_seeds: Dict[str, int] = {}
-        for name, value in exported_seeds.items():
+        rejected_seeds: list[Dict[str, Any]] = []
+        for name, value in seed_items:
             try:
                 coerced = int(value)
             except (TypeError, ValueError):
+                rejected_seeds.append({"name": str(name), "raw_value": value})
                 _LOGGER.warning(
-                    "Skipping invalid observability seed; expected integer coercible value",
-                    run_id=self.run_id,
-                    seed_name=name,
-                    seed_value=value,
+                    "Skipping invalid observability seed for run %s; key=%s value=%r",
+                    self.run_id,
+                    name,
+                    value,
                 )
                 continue
             validated_seeds[str(name)] = coerced
         exported["seeds"] = dict(validated_seeds)
-        self._observability_snapshot = snapshot
 
         metadata_dir = self._metadata_directory()
         if metadata_dir is None:
+            fallback_dir = Path.cwd()
             _LOGGER.warning(
-                "Metadata directory unavailable; defaulting to current working directory for observability payload",
-                run_id=self.run_id,
+                "Metadata directory unavailable for run %s; defaulting to %s for observability payload",
+                self.run_id,
+                fallback_dir,
             )
-            metadata_dir = Path.cwd()
+            metadata_dir = fallback_dir
         else:
-            metadata_dir.mkdir(parents=True, exist_ok=True)
+            try:
+                metadata_dir.mkdir(parents=True, exist_ok=True)
+            except OSError as exc:
+                fallback_dir = Path.cwd()
+                _LOGGER.error(
+                    "Failed to create metadata directory %s for run %s; defaulting to %s (%s)",
+                    metadata_dir,
+                    self.run_id,
+                    fallback_dir,
+                    exc,
+                )
+                metadata_dir = fallback_dir
 
-        observability_path = serialize_json(
-            exported,
-            metadata_dir / f"{self.run_id}.observability.json",
-        )
-        resolved_path = observability_path.resolve()
-        self._data["observability"] = {
-            "path": str(resolved_path),
-            "checksum": stable_hash(exported),
-        }
-        self.add_artifact(resolved_path, kind="observability")
+        observability_record: Dict[str, Any] = {}
+        observability_path: Path | None = None
+        try:
+            observability_path = serialize_json(
+                exported,
+                metadata_dir / f"{self.run_id}.observability.json",
+            )
+        except (OSError, TypeError, ValueError) as exc:
+            _LOGGER.exception(
+                "Failed to serialize observability payload for run %s; skipping attachment (%s)",
+                self.run_id,
+                exc,
+            )
+        else:
+            resolved_path = observability_path.resolve()
+            observability_record = {
+                "path": str(resolved_path),
+                "checksum": stable_hash(exported),
+            }
+            self.add_artifact(resolved_path, kind="observability")
+
+        configuration = self._data.setdefault("configuration", {})
+        manifest_seeds = configuration.setdefault("seeds", dict(self._seeds))
+        conflicts: Dict[str, Dict[str, Any]] = {}
+
+        # Merge policy: prefer the existing manifest seeds and only backfill missing entries from observability.
+        for name, value in validated_seeds.items():
+            if name in manifest_seeds:
+                existing_value = manifest_seeds[name]
+                if existing_value != value:
+                    conflicts[name] = {"kept": existing_value, "ignored": value}
+                    _LOGGER.info(
+                        "Observability seed conflict for run %s; keeping existing value for %s (existing=%r, observability=%r)",
+                        self.run_id,
+                        name,
+                        existing_value,
+                        value,
+                    )
+                    continue
+            else:
+                manifest_seeds[name] = value
+
+            self._seeds[name] = manifest_seeds[name]
+            if self._observability:
+                self._observability.register_seed(name, manifest_seeds[name])
+
+        evidence_section = exported.get("evidence", {}) if isinstance(exported, Mapping) else {}
+        if not isinstance(evidence_section, Mapping):
+            _LOGGER.warning(
+                "Observability evidence payload for run %s is not mapping-compatible; skipping integration (type=%s)",
+                self.run_id,
+                type(evidence_section).__name__,
+            )
+            evidence_section = {}
+
+        samples_section = evidence_section.get("samples", {}) if isinstance(evidence_section, Mapping) else {}
+        if not isinstance(samples_section, Mapping):
+            _LOGGER.warning(
+                "Observability evidence samples payload for run %s is not mapping-compatible; skipping integration (type=%s)",
+                self.run_id,
+                type(samples_section).__name__,
+            )
+            samples_section = {}
 
         evidence_samples: list[Dict[str, Any]] = []
-        for phase, samples in exported.get("evidence", {}).get("samples", {}).items():
+        for phase, samples in samples_section.items():
+            if isinstance(samples, (str, bytes)) or not isinstance(samples, Iterable):
+                _LOGGER.warning(
+                    "Observability evidence samples for run %s and phase %s are not iterable; skipping (type=%s)",
+                    self.run_id,
+                    phase,
+                    type(samples).__name__,
+                )
+                continue
             for entry in samples:
+                if not isinstance(entry, Mapping):
+                    _LOGGER.warning(
+                        "Observability evidence entry for run %s and phase %s is not a mapping; skipping (type=%s)",
+                        self.run_id,
+                        phase,
+                        type(entry).__name__,
+                    )
+                    continue
                 sample = dict(entry)
                 sample["phase"] = phase
                 evidence_samples.append(sample)
 
-        legacy_samples = list(self._data.get("evidence_samples", []))
-        legacy_samples.extend(evidence_samples)
-        self._data["evidence_samples"] = legacy_samples
+        if evidence_samples:
+            legacy_samples = list(self._data.get("evidence_samples", []))
+            legacy_samples.extend(evidence_samples)
+            self._data["evidence_samples"] = legacy_samples
+
+        operations_payload = exported.get("operations", []) if isinstance(exported, Mapping) else []
+        if isinstance(operations_payload, Mapping) or isinstance(operations_payload, (str, bytes)):
+            _LOGGER.warning(
+                "Observability operations payload for run %s is not iterable; skipping (type=%s)",
+                self.run_id,
+                type(operations_payload).__name__,
+            )
+            operations_payload = []
 
         legacy_logs = list(self._data.get("operation_logs", []))
-        legacy_logs.extend(exported.get("operations", []))
+        for entry in operations_payload:
+            if not isinstance(entry, Mapping):
+                _LOGGER.warning(
+                    "Observability operation entry for run %s is not a mapping; skipping (type=%s)",
+                    self.run_id,
+                    type(entry).__name__,
+                )
+                continue
+            legacy_logs.append(dict(entry))
         self._data["operation_logs"] = legacy_logs
 
         prompt_versions = self._coerce_prompt_versions(exported.get("prompt_versions", {}))
         if prompt_versions:
             self._data.setdefault("prompt_versions", {}).update(prompt_versions)
 
-        configuration = self._data.setdefault("configuration", {})
-        if validated_seeds:
-            self._seeds.update(validated_seeds)
-            configuration.setdefault("seeds", {}).update(validated_seeds)
-            if self._observability:
-                for name, value in validated_seeds.items():
-                    self._observability.register_seed(name, value)
+        thresholds_payload = exported.get("thresholds", {}) if isinstance(exported, Mapping) else {}
+        if isinstance(thresholds_payload, Mapping):
+            configuration.setdefault("thresholds", {}).update(dict(thresholds_payload))
+            self._thresholds.update(dict(thresholds_payload))
+        elif thresholds_payload:
+            _LOGGER.warning(
+                "Observability thresholds payload for run %s is not mapping-compatible; skipping integration (type=%s)",
+                self.run_id,
+                type(thresholds_payload).__name__,
+            )
 
-        thresholds = exported.get("thresholds", {})
-        if thresholds:
-            configuration.setdefault("thresholds", {}).update(thresholds)
+        observability_meta = self._data.setdefault("observability", {})
+        if observability_record:
+            observability_meta.update(observability_record)
+        if rejected_seeds:
+            observability_meta.setdefault("rejected_seeds", []).extend(rejected_seeds)
+        if conflicts:
+            observability_meta.setdefault("seed_conflicts", {}).update(conflicts)
+
+        if observability_path is None and not observability_record:
+            _LOGGER.info(
+                "Observability integration completed for run %s without file attachment",
+                self.run_id,
+            )
 
     def _compute_checksums(self) -> None:
         payload = {key: value for key, value in self._data.items() if key != "checksums"}
@@ -370,9 +522,23 @@ class RunManifest:
             self._data["checksums"]["manifest"] = stable_hash(payload)
 
     def finalize(self) -> Dict[str, Any]:
-        _LOGGER.info("Finalising run manifest", run_id=self.run_id)
-        self._integrate_observability()
-        self._compute_checksums()
+        _LOGGER.info("Finalising run manifest for run %s", self.run_id)
+        try:
+            self._integrate_observability()
+        except Exception as exc:  # pragma: no cover - defensive guard
+            _LOGGER.exception(
+                "Observability integration failed during finalize for run %s; continuing without observability (%s)",
+                self.run_id,
+                exc,
+            )
+        try:
+            self._compute_checksums()
+        except Exception as exc:  # pragma: no cover - defensive guard
+            _LOGGER.exception(
+                "Checksum computation failed during finalize for run %s; continuing without checksum updates (%s)",
+                self.run_id,
+                exc,
+            )
         self._data.setdefault("finalized_at", datetime.now(timezone.utc).isoformat())
         return dict(self._data)
 
