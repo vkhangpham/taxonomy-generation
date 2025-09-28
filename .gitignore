@@ -1,5 +1,6 @@
 # Python-generated files
 __pycache__/
+**/__pycache__/
 *.py[oc]
 build/
 dist/
@@ -16,3 +17,19 @@ logs
 AGENTS.md
 .pytest_cache
 .env
+.coverage
+coverage.xml
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+.nox/
+.tox/
+.python-version
+.idea/
+.vscode/
+.DS_Store
+.venv/
+*.swp
+*.swo
+*.log
+.serena-cli/
