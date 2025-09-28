@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+from copy import deepcopy
 from pathlib import Path
 from typing import Any, Dict, Iterable, Optional
 
@@ -19,7 +20,7 @@ def _extend_with_defaults(validator_cls: Draft7Validator.__class__):
         if isinstance(instance, dict):
             for property_name, subschema in properties.items():
                 if "default" in subschema and property_name not in instance:
-                    instance[property_name] = subschema["default"]
+                    instance[property_name] = deepcopy(subschema["default"])
         yield from validate_properties(validator, properties, instance, schema)
 
     return validators.extend(validator_cls, {"properties": _set_defaults})
