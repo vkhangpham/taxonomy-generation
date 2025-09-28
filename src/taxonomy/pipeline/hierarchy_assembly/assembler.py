@@ -99,7 +99,9 @@ class HierarchyAssembler:
                     continue
                 if strategy == "attach_placeholder":
                     placeholder_parent = self._ensure_placeholder(concept.level - 1)
-                    working = concept.model_copy(update={"parents": [placeholder_parent]})
+                    updated_parents = list(resolved_parents)
+                    updated_parents.append(placeholder_parent)
+                    working = concept.model_copy(update={"parents": updated_parents})
             elif resolved_parents and len(resolved_parents) != len(set(resolved_parents)):
                 working = concept.model_copy(update={"parents": sorted(set(resolved_parents))})
 

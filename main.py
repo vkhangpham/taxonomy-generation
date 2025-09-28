@@ -9,7 +9,6 @@ from typing import Any, Dict, Iterable
 from taxonomy.config.settings import Settings
 from taxonomy.orchestration import TaxonomyOrchestrator, run_taxonomy_pipeline
 from taxonomy.orchestration.checkpoints import CheckpointManager
-from taxonomy.utils.helpers import ensure_directory
 from taxonomy.utils.logging import get_logger
 
 _LOGGER = get_logger(module=__name__)
@@ -99,12 +98,12 @@ def main(argv: Iterable[str] | None = None) -> int:
         if args.environment:
             settings_kwargs["environment"] = args.environment
         settings = Settings(**settings_kwargs)
-        run_root = ensure_directory(Path(settings.paths.output_dir) / "runs")
+        run_root = Path(settings.paths.output_dir) / "runs"
         checkpoint_dir = run_root / args.run_id
         if not checkpoint_dir.exists():
             _LOGGER.info("No checkpoints found", run_id=args.run_id)
             return 0
-        manager = CheckpointManager(args.run_id, checkpoint_dir)
+        manager = CheckpointManager(args.run_id, run_root)
         for phase in sorted(manager.base_directory.glob("*.checkpoint.json")):
             _LOGGER.info("Checkpoint", phase=phase.name)
         return 0
