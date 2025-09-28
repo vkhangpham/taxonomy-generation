@@ -166,6 +166,21 @@ policies:
     cost_tracking:
       token_budget_per_hour: 20000
       enabled: false
+  disambiguation:
+    min_parent_divergence: 0.3
+    min_context_overlap_threshold: 0.2
+    require_multiple_parents: true
+    max_contexts_per_parent: 5
+    context_window_size: 100
+    min_token_frequency: 2
+    llm_enabled: true
+    max_contexts_for_prompt: 10
+    gloss_max_words: 20
+    min_evidence_strength: 0.6
+    defer_ambiguous_threshold: 0.4
+    allow_multi_parent_exceptions: false
+    sample_splits_count: 5
+    detailed_logging: false
   validation:
     rules:
       forbidden_patterns:

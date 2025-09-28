@@ -21,9 +21,14 @@ prompts:
     active_variant: v1
     variants:
       v1:
+        variant_version: "2025-09-27"
         description: "Disambiguate identical surface forms into distinct senses."
         template: templates/disambiguation.jinja2
         schema: schemas/disambiguation.json
+        configuration:
+          policy: disambiguation
+          max_contexts: 10
+          gloss_max_words: 20
         optimization_history: []
   taxonomy.validate:
     active_variant: v1

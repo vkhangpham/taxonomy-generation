@@ -1,6 +1,15 @@
 """Utility helpers shared across taxonomy modules."""
 
 from .acronym import abbrev_score, detect_acronym, is_acronym_expansion
+from .context_features import (
+    ContextWindow,
+    analyze_institution_distribution,
+    compute_context_divergence,
+    compute_token_cooccurrence,
+    extract_context_windows,
+    extract_parent_lineage_key,
+    summarize_contexts_for_llm,
+)
 from .helpers import (
     chunked,
     ensure_directory,
@@ -67,4 +76,11 @@ __all__ = [
     "generate_phonetic_key",
     "phonetic_bucket_keys",
     "bucket_by_phonetic",
+    "ContextWindow",
+    "extract_parent_lineage_key",
+    "extract_context_windows",
+    "compute_token_cooccurrence",
+    "analyze_institution_distribution",
+    "compute_context_divergence",
+    "summarize_contexts_for_llm",
 ]
