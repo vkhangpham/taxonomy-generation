@@ -2,16 +2,27 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Iterable, List, Sequence
 
 from ...config.policies import ValidationPolicy
-from ...entities.core import Concept, ValidationFinding, PageSnapshot
+from ...entities.core import Concept, Rationale, ValidationFinding, PageSnapshot
 from .aggregator import AggregatedDecision, ValidationAggregator
 from .evidence import EvidenceIndexer, EvidenceSnippet
 from .llm import LLMValidator, LLMResult
 from .rules import RuleValidator, RuleResult
 from .web import WebValidator, WebResult
+
+VALIDATION_GATE = "validation"
+META_SCORES = "scores"
+META_CONFIDENCE = "confidence"
+"""Validation metadata schema.
+
+- ``concept.validation_metadata[META_SCORES]`` stores per-validator float scores.
+- ``concept.validation_metadata[META_CONFIDENCE]`` stores the aggregated confidence as a float or ``None``.
+- ``concept.rationale.passed_gates[VALIDATION_GATE]`` records the boolean aggregated validation outcome.
+"""
 
 
 @dataclass
@@ -65,6 +76,7 @@ class ValidationProcessor:
     def process(self, concepts: Iterable[Concept]) -> List[ValidationOutcome]:
         outcomes: List[ValidationOutcome] = []
         for concept in concepts:
+            metadata, _ = self._ensure_validation_structures(concept)
             self._stats["concepts"] += 1
             self._stats["checked"] += 1
             rule_result = self._rule_validator.validate_concept(concept)
@@ -98,9 +110,9 @@ class ValidationProcessor:
                 self._stats["validation_passed"] += 1
                 self._stats["passed_all"] += 1
 
-            concept.validation_metadata["evidence_count"] = len(evidence_payload)
+            metadata["evidence_count"] = len(evidence_payload)
             if evidence_payload:
-                concept.validation_metadata["top_evidence_url"] = evidence_payload[0].url
+                metadata["top_evidence_url"] = evidence_payload[0].url
 
             self._apply_to_concept(concept, decision)
             outcomes.append(
@@ -114,8 +126,39 @@ class ValidationProcessor:
         return outcomes
 
     def _apply_to_concept(self, concept: Concept, decision: AggregatedDecision) -> None:
-        concept.validation_passed = decision.passed
-        concept.validation_metadata["scores"] = decision.scores
-        concept.validation_metadata["confidence"] = decision.confidence
-        concept.rationale.passed_gates["validation"] = decision.passed
-        concept.rationale.reasons.append(decision.rationale)
+        concept.set_validation_passed(decision.passed, gate=VALIDATION_GATE)
+        metadata, rationale = self._ensure_validation_structures(concept)
+
+        metadata[META_SCORES] = deepcopy(decision.scores)
+
+        confidence = decision.confidence
+        if confidence is not None:
+            if not isinstance(confidence, (int, float)) or isinstance(confidence, bool):
+                raise TypeError(
+                    "AggregatedDecision.confidence must be a numeric type when provided."
+                )
+            metadata[META_CONFIDENCE] = float(confidence)
+        else:
+            metadata[META_CONFIDENCE] = None
+
+        rationale.reasons.append(decision.rationale)
+
+    @staticmethod
+    def _ensure_validation_structures(concept: Concept) -> tuple[dict, Rationale]:
+        metadata = concept.validation_metadata
+        if metadata is None:
+            metadata = {}
+        elif not isinstance(metadata, dict):
+            metadata = dict(metadata)
+        concept.validation_metadata = metadata
+
+        rationale = concept.rationale
+        if rationale is None:
+            rationale = Rationale()
+        if rationale.passed_gates is None:
+            rationale.passed_gates = {}
+        if rationale.reasons is None:
+            rationale.reasons = []
+        concept.rationale = rationale
+
+        return metadata, rationale

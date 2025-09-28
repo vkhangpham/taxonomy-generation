@@ -206,6 +206,23 @@ class Concept(BaseModel):
             raise ValueError("canonical_label must contain non-whitespace characters")
         return cleaned
 
+    def set_validation_passed(self, passed: bool | None, *, gate: str = "validation") -> None:
+        """Update validation result and keep rationale in sync with a single source of truth."""
+
+        self.validation_passed = passed
+
+        if self.rationale is None:
+            self.rationale = Rationale()
+
+        rationale = self.rationale
+        if rationale.passed_gates is None:
+            rationale.passed_gates = {}
+
+        if passed is None:
+            rationale.passed_gates.pop(gate, None)
+        else:
+            rationale.passed_gates[gate] = passed
+
     def validate_hierarchy(self, parent_concepts: Sequence["Concept"] | None = None) -> None:
         """Validate hierarchy invariants.
 
