@@ -144,19 +144,19 @@ class ObservabilityManifest:
         operations.sort(key=lambda item: item["sequence"])
         return operations
 
-    def build_payload(self) -> Dict[str, Any]:
-        snapshot = self.snapshot()
-        counters = self.aggregate_counters(snapshot)
-        evidence = self.integrate_evidence(snapshot.evidence)
-        quarantine = self.format_quarantine_data(snapshot.quarantine)
-        operations = self._format_operations(snapshot)
+    def build_payload(self, snapshot: Optional[ObservabilitySnapshot] = None) -> Dict[str, Any]:
+        snap = snapshot or self.snapshot()
+        counters = self.aggregate_counters(snap)
+        evidence = self.integrate_evidence(snap.evidence)
+        quarantine = self.format_quarantine_data(snap.quarantine)
+        operations = self._format_operations(snap)
         performance = {
             phase: dict(metrics)
-            for phase, metrics in sorted(snapshot.performance.items(), key=lambda item: item[0])
+            for phase, metrics in sorted(snap.performance.items(), key=lambda item: item[0])
         }
-        prompt_versions = dict(sorted(snapshot.prompt_versions.items()))
-        thresholds = dict(sorted(snapshot.thresholds.items()))
-        seeds = dict(sorted(snapshot.seeds.items()))
+        prompt_versions = dict(sorted(snap.prompt_versions.items()))
+        thresholds = dict(sorted(snap.thresholds.items()))
+        seeds = dict(sorted(snap.seeds.items()))
         return {
             "counters": counters,
             "quarantine": quarantine,
@@ -166,8 +166,9 @@ class ObservabilityManifest:
             "prompt_versions": prompt_versions,
             "thresholds": thresholds,
             "seeds": seeds,
-            "checksum": snapshot.checksum,
-            "captured_at": snapshot.captured_at,
+            "checksum": snap.checksum,
+            "snapshot_timestamp": snap.snapshot_timestamp,
+            "captured_at": snap.captured_at,
         }
 
 
