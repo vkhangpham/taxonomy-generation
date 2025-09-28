@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import math
+import numbers
 from dataclasses import dataclass
-from typing import Callable, Dict, Optional
+from typing import Callable, Dict, Mapping
 
 from taxonomy.llm import (
     ProviderError,
@@ -27,6 +29,29 @@ class LLMVerificationResult:
 class LLMTokenVerifier:
     """Run the single-token verification prompt and parse responses."""
 
+    _PASS_KEY_CANDIDATES = ("pass", "passed", "ok", "success")
+    _TRUTHY_STRINGS = {
+        "true",
+        "1",
+        "yes",
+        "y",
+        "on",
+        "pass",
+        "passed",
+        "ok",
+        "success",
+    }
+    _FALSY_STRINGS = {
+        "false",
+        "0",
+        "no",
+        "n",
+        "off",
+        "fail",
+        "failed",
+        "failure",
+    }
+
     def __init__(
         self,
         *,
@@ -35,11 +60,14 @@ class LLMTokenVerifier:
         self._runner = runner or self._default_runner
         self._log = get_logger(module=__name__)
 
-    @staticmethod
-    def _default_runner(prompt_key: str, variables: Dict[str, object]) -> object:
+    def _default_runner(self, prompt_key: str, variables: Dict[str, object]) -> object:
         response = llm_run(prompt_key, variables)
         if getattr(response, "ok", False):
-            return response.content
+            content = response.content
+            if isinstance(content, dict):
+                # Validate the pass flag early to surface schema issues sooner.
+                self._parse_pass_value(content)
+            return content
         raise ProviderError(response.error or "LLM verification failed", retryable=False)
 
     def verify(self, label: str, level: int) -> LLMVerificationResult:
@@ -68,18 +96,74 @@ class LLMTokenVerifier:
                 error="LLM returned non-dict payload",
             )
 
-        raw_pass = response.get("pass")
-        if isinstance(raw_pass, bool):
-            passed = raw_pass
-        elif isinstance(raw_pass, str):
-            passed = raw_pass.strip().lower() in {"true", "1", "yes"}
-        elif isinstance(raw_pass, (int, float)):
-            passed = bool(raw_pass)
-        else:
-            passed = False
-
+        passed = self._parse_pass_value(response)
         reason = str(response.get("reason", "")) or ("pass" if passed else "fail")
         return LLMVerificationResult(passed=passed, reason=reason, raw=response)
+
+    def _parse_pass_value(self, response: Mapping[str, object]) -> bool:
+        raw_pass: object | None = None
+        selected_key: str | None = None
+        for key in self._PASS_KEY_CANDIDATES:
+            if key in response:
+                raw_pass = response[key]
+                selected_key = key
+                break
+
+        if isinstance(raw_pass, bool):
+            return raw_pass
+
+        if raw_pass is None:
+            return False
+
+        if not isinstance(raw_pass, (bool, str, int, float)):
+            self._log.warning(
+                "LLM token verification returned non-primitive pass value",
+                pass_key=selected_key,
+                value_type=type(raw_pass).__name__,
+                value_summary=self._summarize_value(raw_pass),
+            )
+
+        if isinstance(raw_pass, str):
+            normalized = raw_pass.strip()
+            if not normalized:
+                return False
+            folded = normalized.casefold()
+            if folded in self._TRUTHY_STRINGS:
+                return True
+            if folded in self._FALSY_STRINGS:
+                return False
+            try:
+                numeric_value = float(normalized)
+            except ValueError:
+                return False
+            if math.isnan(numeric_value):
+                return False
+            return numeric_value != 0.0
+
+        if isinstance(raw_pass, numbers.Number) and not isinstance(raw_pass, bool):
+            try:
+                numeric_value = float(raw_pass)
+            except (TypeError, ValueError):
+                return bool(raw_pass)
+            if math.isnan(numeric_value):
+                return False
+            return numeric_value != 0.0
+
+        return False
+
+    @staticmethod
+    def _summarize_value(value: object) -> str:
+        if value is None:
+            return "None"
+        if isinstance(value, dict):
+            return f"dict(len={len(value)})"
+        if isinstance(value, (list, tuple, set)):
+            return f"{type(value).__name__}(len={len(value)})"
+        summary = repr(value)
+        summary = summary.replace("\n", " ")
+        if len(summary) > 48:
+            summary = f"{summary[:45]}..."
+        return summary
 
 
 __all__ = ["LLMTokenVerifier", "LLMVerificationResult"]
