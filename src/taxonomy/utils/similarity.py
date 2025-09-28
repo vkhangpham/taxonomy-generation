@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import hashlib
-import inspect
 import math
 import re
 from functools import lru_cache
@@ -17,15 +16,37 @@ from .logging import get_logger, verbose_text_logging_enabled
 
 _NON_WORD_RE = re.compile(r"[^\w\s]+", re.UNICODE)
 _LOGGER = get_logger(module=__name__)
+
+# Cache sizes balance reuse against memory (roughly a few MiB per cache at these limits).
+_PREPROCESS_CACHE_SIZE = 2048  # Normalized text cache keeps short strings hot without unbounded growth.
+_TOKENIZE_CACHE_SIZE = 2048  # Token tuples stay cached while keeping memory within a few MiB.
+_JW_CACHE_SIZE = 4096  # Pairwise Jaro-Winkler scores; larger key space but still under tens of MiB.
 _DEFAULT_PREFIX_WEIGHT = 0.1
 _MAX_PREFIX_LENGTH = 4
 _PREFIX_WEIGHT_CAP = 0.25
 
 try:
-    _JARO_WINKLER_SUPPORTS_PREFIX = "prefix_weight" in inspect.signature(jellyfish.jaro_winkler_similarity).parameters
-except (ValueError, TypeError):  # pragma: no cover - defensive
+    jellyfish.jaro_winkler_similarity(
+        "prefix",
+        "prefix",
+        prefix_weight=_DEFAULT_PREFIX_WEIGHT,
+    )
+except TypeError:
     _JARO_WINKLER_SUPPORTS_PREFIX = False
-
+    _LOGGER.debug(
+        "prefix_weight unsupported by jellyfish; using manual Winkler boost fallback",
+    )
+except Exception as exc:  # pragma: no cover - defensive
+    _JARO_WINKLER_SUPPORTS_PREFIX = False
+    _LOGGER.debug(
+        "prefix_weight support check failed; assuming unsupported",
+        error=str(exc),
+    )
+else:
+    _JARO_WINKLER_SUPPORTS_PREFIX = True
+    _LOGGER.debug(
+        "prefix_weight supported by jellyfish.jaro_winkler_similarity",
+    )
 
 def _ordered_pair(text1: str, text2: str) -> Tuple[str, str]:
     """Return a deterministic ordering of two strings for cache keys."""
@@ -33,7 +54,7 @@ def _ordered_pair(text1: str, text2: str) -> Tuple[str, str]:
     return (text1, text2) if text1 <= text2 else (text2, text1)
 
 
-@lru_cache(maxsize=2048)
+@lru_cache(maxsize=_PREPROCESS_CACHE_SIZE)
 def preprocess_for_similarity(text: str) -> str:
     """Normalize text for similarity calculations."""
 
@@ -58,7 +79,7 @@ def preprocess_for_similarity(text: str) -> str:
     return collapsed
 
 
-@lru_cache(maxsize=2048)
+@lru_cache(maxsize=_TOKENIZE_CACHE_SIZE)
 def _tokenize(text: str) -> Tuple[str, ...]:
     """Tokenize preprocessed text and cache the result."""
 
@@ -137,6 +158,12 @@ def token_jaccard_similarity(text1: str, text2: str) -> float:
 
 
 def _matched_prefix_length(text1: str, text2: str) -> int:
+    """Return the matching prefix length capped at _MAX_PREFIX_LENGTH.
+
+    The cap is a heuristic that bounds how much prefix overlap influences
+    similarity calculations.
+    """
+
     prefix = 0
     for ch1, ch2 in zip(text1, text2):
         if ch1 != ch2 or prefix >= _MAX_PREFIX_LENGTH:
@@ -145,8 +172,16 @@ def _matched_prefix_length(text1: str, text2: str) -> int:
     return prefix
 
 
-@lru_cache(maxsize=4096)
+@lru_cache(maxsize=_JW_CACHE_SIZE)
 def _jaro_winkler_cached(text1: str, text2: str, prefix_weight: float) -> float:
+    """Return a cached Jaro-Winkler score with fallback when prefix_weight is unavailable.
+
+    Cache keys pair the normalized string order with the effective prefix weight so
+    repeat computations reuse the stored result. When jellyfish lacks native support
+    for prefix_weight we reconstruct the Winkler boost while delegating the base Jaro
+    distance to jellyfish for performance.
+    """
+
     if _JARO_WINKLER_SUPPORTS_PREFIX:
         return jellyfish.jaro_winkler_similarity(text1, text2, prefix_weight=prefix_weight)
 
@@ -174,7 +209,9 @@ def _jaro_winkler_cached(text1: str, text2: str, prefix_weight: float) -> float:
     return boosted
 
 
-def jaro_winkler_similarity(text1: str, text2: str, *, prefix_weight: float = _DEFAULT_PREFIX_WEIGHT) -> float:
+def jaro_winkler_similarity(
+    text1: str, text2: str, *, prefix_weight: float = _DEFAULT_PREFIX_WEIGHT
+) -> float:
     """Compute the Jaro-Winkler similarity between two strings."""
 
     normalized_1 = preprocess_for_similarity(text1)
@@ -183,12 +220,19 @@ def jaro_winkler_similarity(text1: str, text2: str, *, prefix_weight: float = _D
         return 1.0
     if not normalized_1 or not normalized_2:
         return 0.0
+
     ordered_1, ordered_2 = _ordered_pair(normalized_1, normalized_2)
-    score = _jaro_winkler_cached(ordered_1, ordered_2, prefix_weight)
+
+    requested_prefix_weight = float(prefix_weight)
+    bounded_prefix_weight = max(0.0, min(_PREFIX_WEIGHT_CAP, requested_prefix_weight))
+    cache_prefix_weight = round(bounded_prefix_weight, 4)  # Stabilize cache keys.
+
+    score = _jaro_winkler_cached(ordered_1, ordered_2, cache_prefix_weight)
     _LOGGER.debug(
         "Computed Jaro-Winkler similarity",
         score=score,
-        prefix_weight=prefix_weight,
+        requested_prefix_weight=requested_prefix_weight,
+        cache_prefix_weight=cache_prefix_weight,
     )
     return score
 
@@ -199,6 +243,13 @@ def _hash_shingle(shingle: str, seed: int) -> int:
 
 
 def _minhash_signature(shingles: Iterable[str], num_hashes: int) -> List[int]:
+    """Generate a MinHash signature by tracking the minimum hash for each seed.
+
+    Each shingle is hashed with deterministic seeds and the signature keeps the
+    lowest value per seed so the result approximates Jaccard similarity in later
+    comparisons.
+    """
+
     max_hash = 2**64 - 1
     signature: List[int] = [max_hash] * num_hashes
     for shingle in shingles:
@@ -282,24 +333,8 @@ def compute_similarity(
     """Dispatch similarity computation based on the configured method."""
 
     method_normalized = method.lower()
-    if method_normalized == "jaccard_shingles":
-        return jaccard_similarity(text1, text2, **{"n": kwargs.get("n", 3)})
-    if method_normalized == "token_jaccard":
-        return token_jaccard_similarity(text1, text2)
-    if method_normalized == "minhash":
-        return minhash_similarity(
-            text1,
-            text2,
-            num_hashes=int(kwargs.get("num_hashes", 128)),
-            n=int(kwargs.get("n", 3)),
-        )
-    if method_normalized == "jaro_winkler":
-        return jaro_winkler_similarity(
-            text1,
-            text2,
-            prefix_weight=float(kwargs.get("prefix_weight", 0.1)),
-        )
-    if method_normalized == "combined":
+
+    def combined_handler() -> float | Tuple[float, Dict[str, float]]:
         combined, components = _combined_similarity(
             text1,
             text2,
@@ -314,7 +349,33 @@ def compute_similarity(
         if kwargs.get("return_components"):
             return combined, components
         return combined
-    raise ValueError(f"Unsupported similarity method: {method}")
+
+    method_handlers: Dict[str, Callable[[], float | Tuple[float, Dict[str, float]]]] = {
+        "jaccard_shingles": lambda: jaccard_similarity(
+            text1,
+            text2,
+            n=int(kwargs.get("n", 3)),
+        ),
+        "token_jaccard": lambda: token_jaccard_similarity(text1, text2),
+        "minhash": lambda: minhash_similarity(
+            text1,
+            text2,
+            num_hashes=int(kwargs.get("num_hashes", 128)),
+            n=int(kwargs.get("n", 3)),
+        ),
+        "jaro_winkler": lambda: jaro_winkler_similarity(
+            text1,
+            text2,
+            prefix_weight=float(kwargs.get("prefix_weight", 0.1)),
+        ),
+        "combined": combined_handler,
+    }
+
+    try:
+        handler = method_handlers[method_normalized]
+    except KeyError:
+        raise ValueError(f"Unsupported similarity method: {method}") from None
+    return handler()
 
 
 def find_duplicates(
