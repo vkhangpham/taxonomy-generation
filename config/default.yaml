@@ -223,6 +223,18 @@ policies:
       max_snippets_per_concept: 3
       store_evidence_urls: true
       evidence_sampling_rate: 1.0
+  hierarchy_assembly:
+    enforce_acyclicity: true
+    enforce_unique_paths: true
+    allow_multi_parent_exceptions: []
+    orphan_strategy: quarantine
+    placeholder_parent_prefix: "placeholder::"
+    strict_level_enforcement: true
+    allow_level_shortcuts: false
+    max_graph_size: 100000
+    cycle_detection_method: topological_sort
+    include_graph_stats: true
+    include_invariant_proofs: true
   deduplication:
     thresholds:
       l0_l1: 0.93
