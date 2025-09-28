@@ -115,7 +115,7 @@ class ValidationProcessor:
 
     def _apply_to_concept(self, concept: Concept, decision: AggregatedDecision) -> None:
         concept.validation_passed = decision.passed
-        concept.validation_metadata.setdefault("scores", decision.scores)
+        concept.validation_metadata["scores"] = decision.scores
         concept.validation_metadata["confidence"] = decision.confidence
         concept.rationale.passed_gates["validation"] = decision.passed
         concept.rationale.reasons.append(decision.rationale)

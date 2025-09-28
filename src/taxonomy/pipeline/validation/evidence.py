@@ -120,9 +120,9 @@ class EvidenceIndexer:
             )
         snippets.sort(key=lambda snippet: snippet.score, reverse=True)
         limit = self._policy.evidence.max_snippets_per_concept
-        if limit:
-            return snippets[:limit]
-        return snippets
+        if limit <= 0:
+            return []
+        return snippets[:limit]
 
     def is_empty(self) -> bool:
         self._ensure_built()

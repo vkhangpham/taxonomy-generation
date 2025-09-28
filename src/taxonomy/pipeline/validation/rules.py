@@ -104,18 +104,7 @@ class RuleValidator:
         return [f"venue_name_detected:{match}" for match in matches]
 
     def _is_hard_failure(self, violations: Sequence[str]) -> bool:
-        if not violations:
-            return False
-        hard_prefixes = {
-            "forbidden_pattern",
-            "root_has_parents",
-            "missing_parents",
-            "invalid_level",
-            "missing_required_vocab",
-        }
-        if self._settings.venue_detection_hard:
-            hard_prefixes.add("venue_name_detected")
-        return any(violation.split(":", 1)[0] in hard_prefixes for violation in violations)
+        return bool(violations)
 
     def _build_findings(
         self,

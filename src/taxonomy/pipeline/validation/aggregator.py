@@ -79,7 +79,7 @@ class ValidationAggregator:
 
         threshold = total_weight / 2.0 if total_weight else 0.0
         passed = vote_weight > threshold
-        tie = vote_weight == threshold
+        tie = total_weight > 0.0 and vote_weight == threshold
         if tie:
             if not weights.tie_break_conservative:
                 passed = True
@@ -92,7 +92,6 @@ class ValidationAggregator:
                     passed = True
                 else:
                     passed = False
-
         confidence = 0.0 if total_weight == 0 else vote_weight / total_weight
         rationale = self._format_rationale("Weighted aggregation", [rule_result, web_result, llm_result])
         findings = list(self._chain_findings(rule_result, web_result, llm_result))
