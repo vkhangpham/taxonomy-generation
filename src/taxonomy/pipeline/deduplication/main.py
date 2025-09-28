@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import json
 from pathlib import Path
 from taxonomy.config.settings import Settings, get_settings
 from taxonomy.utils.logging import get_logger, logging_context
@@ -13,6 +12,7 @@ from .io import (
     load_concepts,
     write_deduplicated_concepts,
     write_merge_operations,
+    write_metadata,
 )
 from .processor import DeduplicationProcessor
 
@@ -51,7 +51,7 @@ def deduplicate_concepts(
         merge_ops_path or Path(output_path).with_suffix(".merge_ops.jsonl"),
     )
 
-    metadata_destination = metadata_path or Path(output_path).with_suffix(".metadata.json")
+    metadata_target = metadata_path or Path(output_path).with_suffix(".metadata.json")
     config_snapshot = {
         "policy_version": cfg.policies.policy_version,
         "merge_policy": policy.merge_policy,
@@ -72,11 +72,7 @@ def deduplicate_concepts(
         config_snapshot,
         result.samples,
     )
-    Path(metadata_destination).parent.mkdir(parents=True, exist_ok=True)
-    Path(metadata_destination).write_text(
-        json.dumps(metadata_payload, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
-    )
+    metadata_destination = write_metadata(metadata_payload, metadata_target)
 
     _LOGGER.info(
         "Deduplication outputs written",

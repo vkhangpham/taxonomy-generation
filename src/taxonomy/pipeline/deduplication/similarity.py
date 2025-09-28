@@ -173,10 +173,10 @@ class SimilarityScorer:
         weighted["token_jaccard"] = token * self.policy.jaccard_weight
 
         if hint > 0.0:
+            raw["suffix_prefix_hint"] = hint
             weighted["suffix_prefix_hint"] = hint * max(
                 1.0, self.policy.abbrev_score_weight
             )
-
         return SimilarityFeatures(raw=raw, weighted=weighted, suffix_prefix_hint=hint)
 
     def combined_score(self, features: SimilarityFeatures) -> Tuple[float, str]:

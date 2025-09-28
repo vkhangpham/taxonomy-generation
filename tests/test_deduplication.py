@@ -126,15 +126,30 @@ def test_acronym_blocker_limits_aliases_and_splits_blocks() -> None:
     policy = base_policy(acronym_blocking_enabled=True, max_block_size=2)
     blocker = AcronymBlocker(policy)
     alias_variants = ["AB", "A.B.", "A-B", "A/B", "A B"]
-    concept = make_concept("c_alias", "Alpha Beta", aliases=alias_variants)
+    primary = make_concept("c_alias", "Alpha Beta", aliases=alias_variants)
+    expansions = [
+        make_concept("c_expansion_1", "Applied Biology"),
+        make_concept("c_expansion_2", "Advanced Banking"),
+        make_concept("c_expansion_3", "Academic Board"),
+    ]
 
-    blocks = blocker.build_blocks([concept])
+    concepts = [primary, *expansions]
+
+    blocks = blocker.build_blocks(concepts)
     acronym_blocks = {key: members for key, members in blocks.items() if key.startswith("acronym:AB")}
 
+    assert acronym_blocks, "expected acronym-driven blocks to be produced"
     assert len(acronym_blocks) == 2
-    assert all(len(members) <= policy.max_block_size for members in acronym_blocks.values())
-    total_members = sum(len(members) for members in acronym_blocks.values())
-    assert total_members == min(len(alias_variants), _ACRONYM_ALIAS_LIMIT) + 1
+    unique_ids_per_block = [{concept.id for concept in members} for members in acronym_blocks.values()]
+    for ids, members in zip(unique_ids_per_block, acronym_blocks.values()):
+        assert len(ids) == len(members) <= policy.max_block_size
+
+    observed_ids: set[str] = set()
+    for ids in unique_ids_per_block:
+        observed_ids.update(ids)
+
+    expected_ids = {concept.id for concept in concepts}
+    assert observed_ids == expected_ids
 
 
 def test_phonetic_probe_filters_pairs() -> None:

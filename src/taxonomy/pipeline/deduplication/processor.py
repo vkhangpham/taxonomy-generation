@@ -153,6 +153,8 @@ class DeduplicationProcessor:
         return deduped, merge_ops, samples
 
     def process(self, concepts: Sequence[Concept]) -> DeduplicationResult:
+        # Reset graph state so repeated calls do not reuse stale edges/nodes.
+        self.graph = SimilarityGraph()
         concept_lookup = {concept.id: concept for concept in concepts}
         for concept_id in concept_lookup:
             self.graph.add_node(concept_id)
@@ -172,7 +174,11 @@ class DeduplicationProcessor:
                 continue
             self._compare_block(block_id, members, stats)
 
-        components = [component for component in self.graph.connected_components() if len(component) > 1]
+        components = [
+            component
+            for component in self.graph.connected_components()
+            if len(component) > 1
+        ]
         stats["graph"] = self.graph.stats()
         stats["components_with_edges"] = len(components)
 
@@ -194,6 +200,5 @@ class DeduplicationProcessor:
             remaining=len(deduped_concepts),
         )
         return result
-
 
 __all__ = ["DeduplicationProcessor", "DeduplicationResult"]

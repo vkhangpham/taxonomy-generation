@@ -65,9 +65,11 @@ class BlockingStrategy:
 
         finalized: Dict[str, List[Concept]] = {}
         for key, members in raw_blocks.items():
-            if len(members) < 2:
+            # Collapse duplicates by concept ID before filtering or limiting
+            unique_members = list({member.id: member for member in members}.values())
+            if len(unique_members) < 2:
                 continue
-            limited = self._limit_block(key, members)
+            limited = self._limit_block(key, unique_members)
             for limited_key, chunk in limited.items():
                 block_id = f"{self.name}:{limited_key}"
                 finalized[block_id] = chunk
