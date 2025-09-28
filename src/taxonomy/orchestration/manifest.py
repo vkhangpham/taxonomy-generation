@@ -54,7 +54,24 @@ class RunManifest:
     # ------------------------------------------------------------------
     def attach_observability(self, context: ObservabilityContext) -> None:
         self._observability = context
-        self._observability_manifest = ObservabilityManifest(context=context)
+        self._observability_snapshot = None
+        self._observability_manifest = None
+
+    def _ensure_observability_manifest(self) -> "ObservabilityManifest | None":
+        if self._observability_manifest is not None:
+            return self._observability_manifest
+        if not self._observability:
+            return None
+
+        policy = getattr(self._observability, "policy", None) or self._policy
+        manifest_enabled = True if policy is None else getattr(policy, "audit_trail_generation", True)
+        if not manifest_enabled:
+            return None
+
+        from taxonomy.observability.manifest import ObservabilityManifest
+
+        self._observability_manifest = ObservabilityManifest(context=self._observability)
+        return self._observability_manifest
 
     def collect_versions(self, *, settings: "Settings") -> None:
         self._data["versions"] = {
@@ -62,33 +79,99 @@ class RunManifest:
             "environment": settings.environment,
         }
 
+    def _coerce_prompt_versions(self, payload: Any) -> Dict[str, str]:
+        if not payload:
+            return {}
+        if isinstance(payload, Mapping):
+            items = payload.items()
+        else:
+            try:
+                items = dict(payload).items()
+            except (TypeError, ValueError):
+                _LOGGER.warning(
+                    "Unexpected prompt version payload type %s; ignoring manifest contribution",
+                    type(payload).__name__,
+                )
+                return {}
+
+        coerced: Dict[str, str] = {}
+        for name, version in items:
+            if name is None or version is None:
+                continue
+            coerced[str(name)] = str(version)
+        return coerced
+
+    def _resolve_prompt_keys(
+        self,
+        registry: "PromptRegistry",
+        prompt_keys: Optional[Iterable[str]] = None,
+    ) -> list[str]:
+        if prompt_keys is not None:
+            return sorted({str(key) for key in prompt_keys})
+
+        for accessor in ("list_prompt_keys", "all_prompt_keys"):
+            candidate = getattr(registry, accessor, None)
+            if callable(candidate):
+                try:
+                    keys = list(candidate())
+                except Exception as exc:  # pragma: no cover - defensive guard
+                    _LOGGER.warning(
+                        "Prompt registry accessor %s failed; falling back to other sources",
+                        accessor,
+                        exc_info=exc,
+                    )
+                    continue
+                return sorted({str(key) for key in keys})
+
+        try:
+            raw_data = getattr(registry, "_raw_data")
+        except AttributeError:
+            _LOGGER.warning(
+                "Prompt registry does not expose prompt keys and private _raw_data is unavailable; skipping prompt version fallback",
+            )
+            return []
+
+        if isinstance(raw_data, Mapping):
+            prompts = raw_data.get("prompts", {}) or {}
+        else:
+            _LOGGER.warning(
+                "Prompt registry _raw_data is not a mapping; skipping prompt version fallback",
+            )
+            return []
+
+        _LOGGER.warning(
+            "Prompt registry missing public prompt key accessor; using private _raw_data fallback",
+        )
+        return sorted({str(key) for key in prompts.keys()})
+
     def collect_prompt_versions(
         self,
         registry: "PromptRegistry",
         *,
         prompt_keys: Optional[Iterable[str]] = None,
     ) -> None:
-        if self._observability_manifest is not None:
-            versions = self._observability_manifest.collect_prompt_versions(
+        manifest = self._ensure_observability_manifest()
+        if manifest is not None:
+            versions_payload = manifest.collect_prompt_versions(
                 registry,
                 prompt_keys=prompt_keys,
             )
         else:
-            if prompt_keys is None:
-                raw_prompts = getattr(registry, "_raw_data", {}).get("prompts", {})
-                keys = sorted(raw_prompts.keys())
-            else:
-                keys = sorted(set(prompt_keys))
-            versions = {}
+            keys = self._resolve_prompt_keys(registry, prompt_keys=prompt_keys)
+            versions_payload: Dict[str, str] = {}
             for prompt in keys:
                 try:
-                    versions[prompt] = registry.active_version(prompt)
+                    versions_payload[prompt] = registry.active_version(prompt)
                 except KeyError:
                     continue
-            if self._observability:
-                for prompt, version in versions.items():
-                    self._observability.register_prompt_version(prompt, version)
-        self._data["prompt_versions"].update(versions)
+
+        versions = self._coerce_prompt_versions(versions_payload)
+        if self._observability:
+            for prompt, version in versions.items():
+                self._observability.register_prompt_version(prompt, version)
+
+        if versions:
+            self._data["prompt_versions"].update(versions)
 
     def aggregate_statistics(self, label: str, stats: Dict[str, Any]) -> None:
         self._data["statistics"][label] = dict(stats)
@@ -99,9 +182,10 @@ class RunManifest:
         self._data["evidence_samples"].append(sample)
 
     def capture_configuration(self, *, settings: "Settings") -> None:
-        if self._observability_manifest is not None:
-            thresholds = self._observability_manifest.capture_thresholds(settings)
-            seeds = self._observability_manifest.capture_seeds(settings)
+        manifest = self._ensure_observability_manifest()
+        if manifest is not None:
+            thresholds = manifest.capture_thresholds(settings)
+            seeds = manifest.capture_seeds(settings)
         else:
             thresholds = {
                 "level_thresholds": settings.policies.level_thresholds.model_dump(mode="json"),
@@ -171,6 +255,16 @@ class RunManifest:
     # ------------------------------------------------------------------
     # Finalisation
     # ------------------------------------------------------------------
+    def _metadata_directory(self) -> Path | None:
+        paths = self._data.get("configuration", {}).get("paths", {})
+        metadata_dir = paths.get("metadata_dir")
+        if not metadata_dir:
+            return None
+        try:
+            return Path(metadata_dir)
+        except TypeError:  # pragma: no cover - defensive guard
+            return None
+
     def _integrate_observability(self) -> None:
         if not self._observability or not self._observability_manifest:
             return
