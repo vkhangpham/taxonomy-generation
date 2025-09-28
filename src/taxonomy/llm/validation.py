@@ -7,9 +7,25 @@ import re
 from pathlib import Path
 from typing import Any, Dict, Iterable, Optional
 
-from jsonschema import Draft7Validator, ValidationError as JSONSchemaValidationError
+from jsonschema import Draft7Validator, ValidationError as JSONSchemaValidationError, validators
 
 from .models import ValidationResult
+
+
+def _extend_with_defaults(validator_cls: Draft7Validator.__class__):
+    validate_properties = validator_cls.VALIDATORS["properties"]
+
+    def _set_defaults(validator, properties, instance, schema):
+        if isinstance(instance, dict):
+            for property_name, subschema in properties.items():
+                if "default" in subschema and property_name not in instance:
+                    instance[property_name] = subschema["default"]
+        yield from validate_properties(validator, properties, instance, schema)
+
+    return validators.extend(validator_cls, {"properties": _set_defaults})
+
+
+DefaultDraft7Validator = _extend_with_defaults(Draft7Validator)
 
 
 class JSONValidator:
@@ -73,7 +89,7 @@ class JSONValidator:
 
     @staticmethod
     def _validate_schema(payload: Any, schema: Dict[str, Any]) -> None:
-        Draft7Validator(schema).validate(payload)
+        DefaultDraft7Validator(schema).validate(payload)
 
     @staticmethod
     def _enforce_order(payload: Any, field: str) -> Any:

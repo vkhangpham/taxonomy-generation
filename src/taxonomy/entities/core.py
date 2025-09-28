@@ -160,6 +160,14 @@ class Candidate(BaseModel):
     def _validate_parents(self) -> "Candidate":
         if self.level == 0 and self.parents:
             raise ValueError("level 0 candidates must not declare parents")
+        if (
+            self.level > 0
+            and not self.parents
+            and self.support.institutions != 1
+        ):
+            raise ValueError(
+                "aggregated non-root candidates must declare at least one parent"
+            )
         return self
 
 
@@ -181,6 +189,14 @@ class Concept(BaseModel):
     aliases: List[str] = Field(default_factory=list)
     support: SupportStats = Field(default_factory=SupportStats)
     rationale: Rationale = Field(default_factory=Rationale)
+    validation_passed: bool | None = Field(
+        default=None,
+        description="Overall validation decision aggregated across all validators.",
+    )
+    validation_metadata: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="Validator-specific metadata including evidence counts and scores.",
+    )
 
     @field_validator("canonical_label")
     @classmethod

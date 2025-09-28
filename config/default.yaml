@@ -166,6 +166,48 @@ policies:
     cost_tracking:
       token_budget_per_hour: 20000
       enabled: false
+  validation:
+    rules:
+      forbidden_patterns:
+        - "neurips$"
+        - "icml$"
+        - "cvpr$"
+        - "acl$"
+        - "emnlp$"
+        - "kdd$"
+        - "siggraph$"
+      required_vocabularies: {}
+      venue_patterns:
+        - "neurips"
+        - "icml"
+        - "cvpr"
+        - "acl"
+        - "emnlp"
+        - "kdd"
+        - "siggraph"
+      structural_checks_enabled: true
+    web:
+      authoritative_domains:
+        - "wikipedia.org"
+        - "acm.org"
+        - "ieee.org"
+      snippet_max_length: 200
+      min_snippet_matches: 1
+      evidence_timeout_seconds: 10.0
+    llm:
+      entailment_enabled: true
+      max_evidence_tokens: 1000
+      confidence_threshold: 0.7
+    aggregation:
+      rule_weight: 1.0
+      web_weight: 0.7
+      llm_weight: 0.4
+      hard_rule_failure_blocks: true
+      tie_break_conservative: true
+    evidence:
+      max_snippets_per_concept: 3
+      store_evidence_urls: true
+      evidence_sampling_rate: 1.0
   deduplication:
     thresholds:
       l0_l1: 0.93

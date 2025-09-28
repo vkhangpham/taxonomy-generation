@@ -33,3 +33,11 @@ prompts:
         template: templates/validation.jinja2
         schema: schemas/validation.json
         optimization_history: []
+  validation.entailment:
+    active_variant: v1
+    variants:
+      v1:
+        description: "Perform entailment validation combining structured evidence and model reasoning."
+        template: templates/validation.jinja2
+        schema: schemas/validation.json
+        optimization_history: []

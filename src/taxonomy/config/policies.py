@@ -169,6 +169,83 @@ class SingleTokenVerificationPolicy(BaseModel):
         return [token.strip().lower() for token in value if token.strip()]
 
 
+class RuleValidationSettings(BaseModel):
+    """Configuration for deterministic validation rules."""
+
+    forbidden_patterns: List[str] = Field(default_factory=list)
+    required_vocabularies: Dict[int, List[str]] = Field(default_factory=dict)
+    venue_patterns: List[str] = Field(default_factory=list)
+    structural_checks_enabled: bool = Field(default=True)
+
+    @field_validator("forbidden_patterns", "venue_patterns")
+    @classmethod
+    def _strip_patterns(cls, value: List[str]) -> List[str]:
+        return [pattern.strip() for pattern in value if pattern.strip()]
+
+    @field_validator("required_vocabularies")
+    @classmethod
+    def _normalize_vocab_keys(cls, value: Dict[int | str, List[str]]) -> Dict[int, List[str]]:
+        normalized: Dict[int, List[str]] = {}
+        for key, terms in value.items():
+            level = int(key)
+            normalized[level] = [term.strip().lower() for term in terms if term.strip()]
+        return normalized
+
+
+class WebValidationSettings(BaseModel):
+    """Configuration for evidence-based validation using web snapshots."""
+
+    authoritative_domains: List[str] = Field(default_factory=list)
+    snippet_max_length: int = Field(default=200, ge=40, le=2000)
+    min_snippet_matches: int = Field(default=1, ge=0)
+    evidence_timeout_seconds: float = Field(default=10.0, ge=0.1)
+
+    @field_validator("authoritative_domains")
+    @classmethod
+    def _normalize_domains(cls, value: List[str]) -> List[str]:
+        return [domain.strip().lower() for domain in value if domain.strip()]
+
+
+class LLMValidationSettings(BaseModel):
+    """Configuration for entailment checks performed by the LLM."""
+
+    entailment_enabled: bool = Field(default=True)
+    max_evidence_tokens: int = Field(default=1000, ge=128)
+    confidence_threshold: float = Field(default=0.7, ge=0.0, le=1.0)
+
+
+class ValidationAggregationSettings(BaseModel):
+    """Weighted aggregation of validation signals."""
+
+    rule_weight: float = Field(default=1.0, ge=0.0)
+    web_weight: float = Field(default=0.7, ge=0.0)
+    llm_weight: float = Field(default=0.4, ge=0.0)
+    hard_rule_failure_blocks: bool = Field(default=True)
+    tie_break_conservative: bool = Field(default=True)
+
+
+class EvidenceStorageSettings(BaseModel):
+    """Controls for evidence retention and sampling."""
+
+    max_snippets_per_concept: int = Field(default=3, ge=0)
+    store_evidence_urls: bool = Field(default=True)
+    evidence_sampling_rate: float = Field(default=1.0, ge=0.0, le=1.0)
+
+
+class ValidationPolicy(BaseModel):
+    """Aggregate configuration for the validation pipeline."""
+
+    rules: RuleValidationSettings = Field(default_factory=RuleValidationSettings)
+    web: WebValidationSettings = Field(default_factory=WebValidationSettings)
+    llm: LLMValidationSettings = Field(default_factory=LLMValidationSettings)
+    aggregation: ValidationAggregationSettings = Field(
+        default_factory=ValidationAggregationSettings
+    )
+    evidence: EvidenceStorageSettings = Field(
+        default_factory=EvidenceStorageSettings
+    )
+
+
 class InstitutionPolicy(BaseModel):
     """Rules for mapping and reconciling institutional identities."""
 
@@ -431,6 +508,7 @@ class Policies(BaseModel):
     deduplication: DeduplicationPolicy
     raw_extraction: RawExtractionPolicy
     level0_excel: LevelZeroExcelPolicy
+    validation: ValidationPolicy = Field(default_factory=ValidationPolicy)
 
     @model_validator(mode="after")
     def _validate_policy_version(self) -> "Policies":
@@ -481,6 +559,12 @@ __all__ = [
     "NearDuplicateDedupPolicy",
     "LabelPolicy",
     "SingleTokenVerificationPolicy",
+    "ValidationPolicy",
+    "RuleValidationSettings",
+    "WebValidationSettings",
+    "LLMValidationSettings",
+    "ValidationAggregationSettings",
+    "EvidenceStorageSettings",
     "InstitutionPolicy",
     "WebDomainRules",
     "LLMDeterminismSettings",
