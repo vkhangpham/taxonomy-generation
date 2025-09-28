@@ -1,5 +1,5 @@
 environment: development
-random_seed: 20230927
+random_seed: 20250927
 paths:
   data_dir: data
   output_dir: output
@@ -142,10 +142,10 @@ policies:
     remove_boilerplate: true
     boilerplate_patterns:
       - '© \d{4}'
-      - 'all rights reserved'
-      - 'privacy policy'
-      - 'terms of use'
-      - 'contact us'
+      - "all rights reserved"
+      - "privacy policy"
+      - "terms of use"
+      - "contact us"
       - 'home \| about \| contact'
     detect_sections: true
     section_header_patterns:
