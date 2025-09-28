@@ -314,12 +314,12 @@ class RunManifest:
         if prompt_versions:
             self._data.setdefault("prompt_versions", {}).update(prompt_versions)
 
-        self._data.setdefault("configuration", {}).setdefault("seeds", {}).update(
-            exported.get("seeds", {})
-        )
-        thresholds = exported.get("thresholds", {})
-        if thresholds:
-            self._data.setdefault("configuration", {}).setdefault("thresholds", {}).update(thresholds)
+        configuration = self._data.setdefault("configuration", {})
+        configuration.setdefault("seeds", {}).update(exported.get("seeds", {}))
+
+        flattened_thresholds = exported.get("thresholds", {})
+        if flattened_thresholds:
+            configuration.setdefault("thresholds_flat", {}).update(flattened_thresholds)
 
     def _compute_checksums(self) -> None:
         payload = {key: value for key, value in self._data.items() if key != "checksums"}
