@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from typing import Dict, List, Tuple
+from typing import Dict, List, Set, Tuple
 
 from taxonomy.config.policies import MinimalCanonicalForm, SingleTokenVerificationPolicy
 from taxonomy.utils.helpers import normalize_whitespace
@@ -48,6 +48,14 @@ class TokenRuleEngine:
         self._min_alnum_ratio = min_alnum_ratio
         self._log = get_logger(module=__name__)
         self._allowlist = {entry.lower(): entry for entry in policy.allowlist}
+        self._venue_aliases: Set[str] = {
+            normalize_whitespace(name).lower()
+            for name in policy.venue_names
+            if name
+        }
+        self._venue_aliases_compact: Set[str] = {
+            alias.replace(" ", "").replace("-", "") for alias in self._venue_aliases
+        }
 
     def count_tokens(self, label: str) -> int:
         prepared = label.strip()
@@ -78,11 +86,26 @@ class TokenRuleEngine:
     def check_venue_names(self, label: str, level: int) -> Tuple[bool, str | None]:
         if not self._policy.venue_names_forbidden or level != 3:
             return True, None
-        lowered = label.lower()
+        normalized = normalize_whitespace(label).lower()
+        alias_hit = self._match_known_venue(normalized)
+        if alias_hit:
+            return False, alias_hit
         for keyword in self.VENUE_KEYWORDS:
-            if keyword in lowered:
+            if keyword in normalized:
                 return False, keyword
         return True, None
+
+    def _match_known_venue(self, normalized: str) -> str | None:
+        squeezed = normalized.replace(" ", "").replace("-", "")
+        if normalized in self._venue_aliases or squeezed in self._venue_aliases_compact:
+            return normalized
+        for alias in self._venue_aliases:
+            alias_squeezed = alias.replace(" ", "").replace("-", "")
+            if squeezed.startswith(alias_squeezed):
+                suffix = squeezed[len(alias_squeezed) :]
+                if not suffix or suffix.isdigit():
+                    return alias
+        return None
 
     def check_allowlist(self, label: str) -> bool:
         return label.lower() in self._allowlist

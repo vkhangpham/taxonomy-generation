@@ -5,7 +5,7 @@ Purpose
 
 Core Tech
 - Rule engine for token/character policy checks.
-- DSPy-managed verification prompt returning compact JSON {pass, reason}.
+- DSPy-managed verification prompt returning compact JSON {pass, reason} (invoked only when deterministic rules fail).
 
 LLM Usage
 - Use the LLM package only: `llm.run("taxonomy.verify_single_token", {label, level})`.
@@ -19,17 +19,19 @@ Policy
 - Prefer single-token, alphanumeric labels without punctuation.
 - Allow multi-word when abbreviation would materially reduce clarity (e.g., "computer vision").
 - Maintain an allowlist for known exceptions; record justification in rationale.
+- Maintain a configurable set of venue names/aliases that must be rejected at L3 even when no generic venue keywords are present.
 
 Gate Order
-1) Rule checks: forbidden punctuation, token count > N, low alnum ratio.
-2) LLM verification: yes/no JSON {pass: bool, reason: string} with level-aware criteria.
+1) Rule checks: forbidden punctuation, token count > N, low alnum ratio, venue names (keywords + alias set).
+2) LLM verification: yes/no JSON {pass: bool, reason: string} with level-aware criteria, only invoked when rules fail and allowlist does not apply.
 
 Failure Handling
 - If rules fail, propose deterministic minimal alternative (strip punctuation, collapse tokens, standard shortenings).
-- If LLM disagrees with rules, log discrepancy; prefer stricter outcome unless allowlist applies.
+- If LLM disagrees with rules, log discrepancy; prefer strictest outcome (AND of rules/LLM) unless allowlist applies.
+- When final decision passes, append accepted suggestions to candidate aliases (deduped + normalized) for downstream auditing.
 
 Observability
-- Counters: checked, passed_rule, failed_rule, passed_llm, failed_llm, allowlist_hits.
+- Counters: checked, passed_rule, failed_rule, passed_llm, failed_llm, allowlist_hits, llm_called.
 - Drift: distribution of token counts by level.
 
 Acceptance Tests

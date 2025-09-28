@@ -31,6 +31,44 @@ class LevelThresholds(BaseModel):
     level_3: LevelThreshold
 
 
+class NearDuplicateDedupPolicy(BaseModel):
+    """Configuration for collapsing near-identical records per institution."""
+
+    enabled: bool = Field(default=True)
+    prefix_delimiters: List[str] = Field(
+        default_factory=lambda: ["::", "#", "@"],
+        description="Delimiters indicating suffixes to strip when deduplicating records.",
+    )
+    strip_numeric_suffix: bool = Field(
+        default=True,
+        description="Strip trailing numeric or version suffixes when computing dedup keys.",
+    )
+    min_prefix_length: int = Field(
+        default=6,
+        ge=1,
+        description="Minimum prefix length required before a delimiter to be considered meaningful.",
+    )
+
+    @field_validator("prefix_delimiters")
+    @classmethod
+    def _normalize_delimiters(cls, value: List[str]) -> List[str]:
+        return [delimiter.strip() for delimiter in value if delimiter.strip()]
+
+
+class FrequencyFilteringPolicy(BaseModel):
+    """Policy controls specific to S2 frequency aggregation."""
+
+    unknown_institution_placeholder: str = Field(
+        default="placeholder::unknown",
+        min_length=1,
+        description="Placeholder identifier used when evidence lacks institution metadata.",
+    )
+    near_duplicate: NearDuplicateDedupPolicy = Field(
+        default_factory=NearDuplicateDedupPolicy,
+        description="Settings controlling near-duplicate collapsing of records.",
+    )
+
+
 class MinimalCanonicalForm(BaseModel):
     """Normalization rules for canonical labels."""
 
@@ -85,9 +123,25 @@ class SingleTokenVerificationPolicy(BaseModel):
             "data science",
         ]
     )
+    venue_names: List[str] = Field(
+        default_factory=lambda: [
+            "neurips",
+            "neural information processing systems",
+            "icml",
+            "international conference on machine learning",
+            "cvpr",
+            "computer vision and pattern recognition",
+            "acl",
+            "association for computational linguistics",
+            "emnlp",
+            "kdd",
+            "siggraph",
+            "isca",
+        ]
+    )
     venue_names_forbidden: bool = Field(default=True)
     hyphenated_compounds_allowed: bool = Field(default=False)
-    prefer_rule_over_llm: bool = Field(default=False)
+    prefer_rule_over_llm: bool = Field(default=True)
 
     @field_validator("max_tokens_per_level")
     @classmethod
@@ -108,6 +162,11 @@ class SingleTokenVerificationPolicy(BaseModel):
     @classmethod
     def _normalize_punctuation(cls, value: List[str]) -> List[str]:
         return [mark.strip() for mark in value if mark.strip()]
+
+    @field_validator("venue_names")
+    @classmethod
+    def _normalize_venue_names(cls, value: List[str]) -> List[str]:
+        return [token.strip().lower() for token in value if token.strip()]
 
 
 class InstitutionPolicy(BaseModel):
@@ -359,6 +418,9 @@ class Policies(BaseModel):
 
     policy_version: str = Field(default="2025-09-27")
     level_thresholds: LevelThresholds
+    frequency_filtering: FrequencyFilteringPolicy = Field(
+        default_factory=FrequencyFilteringPolicy
+    )
     label_policy: LabelPolicy
     single_token: SingleTokenVerificationPolicy = Field(
         default_factory=SingleTokenVerificationPolicy
@@ -415,6 +477,8 @@ __all__ = [
     "load_policies",
     "LevelThresholds",
     "LevelThreshold",
+    "FrequencyFilteringPolicy",
+    "NearDuplicateDedupPolicy",
     "LabelPolicy",
     "SingleTokenVerificationPolicy",
     "InstitutionPolicy",

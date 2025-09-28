@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Iterable, List, Optional
+from typing import Iterable, List, Optional, Set
 
 from taxonomy.config.policies import SingleTokenVerificationPolicy
 from taxonomy.entities.core import Candidate, Rationale
+from taxonomy.utils.helpers import normalize_whitespace
 from taxonomy.utils.logging import get_logger
 
 from .rules import RuleEvaluation, TokenRuleEngine
@@ -65,6 +66,12 @@ class S3Processor:
         verified: List[TokenVerificationDecision] = []
         failed: List[TokenVerificationDecision] = []
         total = 0
+        passed_rule = 0
+        failed_rule = 0
+        allowlist_hits = 0
+        llm_called = 0
+        passed_llm = 0
+        failed_llm = 0
         for entry in items:
             total += 1
             decision = self._evaluate(entry)
@@ -72,15 +79,33 @@ class S3Processor:
                 verified.append(decision)
             else:
                 failed.append(decision)
+            if decision.rule_evaluation.passed:
+                passed_rule += 1
+            else:
+                failed_rule += 1
+            if decision.rule_evaluation.allowlist_hit:
+                allowlist_hits += 1
+            if decision.llm_result is not None:
+                llm_called += 1
+                if decision.llm_result.passed:
+                    passed_llm += 1
+                else:
+                    failed_llm += 1
         stats = {
             "candidates_in": total,
             "verified": len(verified),
             "failed": len(failed),
+            "checked": total,
+            "passed_rule": passed_rule,
+            "failed_rule": failed_rule,
+            "allowlist_hits": allowlist_hits,
+            "llm_called": llm_called,
+            "passed_llm": passed_llm,
+            "failed_llm": failed_llm,
         }
         self._log.info(
             "S3 token verification complete",
-            verified=len(verified),
-            failed=len(failed),
+            stats=stats,
         )
         return TokenVerificationResult(verified=verified, failed=failed, stats=stats)
 
@@ -101,7 +126,7 @@ class S3Processor:
 
         llm_result: Optional[LLMVerificationResult] = None
         if not rule_evaluation.allowlist_hit:
-            needs_llm = (not rule_evaluation.passed) or not self._policy.prefer_rule_over_llm
+            needs_llm = not rule_evaluation.passed
             if needs_llm:
                 llm_result = self._llm_verifier.verify(candidate.normalized, candidate.level)
                 rationale.passed_gates["token_llm"] = llm_result.passed
@@ -116,6 +141,21 @@ class S3Processor:
 
         final_pass = self._final_decision(rule_evaluation, llm_result)
         rationale.passed_gates["token_verification"] = final_pass
+
+        if final_pass and rule_evaluation.suggestions:
+            normalized_existing: Set[str] = set()
+            for alias in candidate.aliases:
+                cleaned_alias = normalize_whitespace(alias).strip()
+                if cleaned_alias:
+                    normalized_existing.add(cleaned_alias)
+            label_alias = normalize_whitespace(candidate.label).strip()
+            if label_alias:
+                normalized_existing.add(label_alias)
+            for suggestion in rule_evaluation.suggestions:
+                cleaned = normalize_whitespace(suggestion).strip()
+                if cleaned:
+                    normalized_existing.add(cleaned)
+            candidate.aliases = sorted(normalized_existing)
 
         decision = TokenVerificationDecision(
             candidate=candidate,

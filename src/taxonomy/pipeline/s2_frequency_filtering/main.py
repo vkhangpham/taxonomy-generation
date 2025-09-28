@@ -41,6 +41,7 @@ def filter_by_frequency(
     aggregator = CandidateAggregator(
         thresholds=cfg.policies.level_thresholds,
         resolver=resolver,
+        frequency_policy=cfg.policies.frequency_filtering,
     )
     processor = S2Processor(aggregator=aggregator)
 

@@ -2,10 +2,17 @@
 
 from __future__ import annotations
 
+import re
+from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from typing import Dict, Iterable, List, Sequence, Set, Tuple
 
-from taxonomy.config.policies import LevelThreshold, LevelThresholds
+from taxonomy.config.policies import (
+    FrequencyFilteringPolicy,
+    LevelThreshold,
+    LevelThresholds,
+    NearDuplicateDedupPolicy,
+)
 from taxonomy.entities.core import Candidate, Rationale, SupportStats
 from taxonomy.utils.helpers import normalize_whitespace
 from taxonomy.utils.logging import get_logger
@@ -67,6 +74,7 @@ class _AggregationBucket:
     record_fingerprints: Set[str] = field(default_factory=set)
     total_count: int = 0
     total_records: int = 0
+    records_by_institution: Dict[str, Set[str]] = field(default_factory=dict)
 
     def as_candidate(self) -> Candidate:
         parents_list: Sequence[str] = list(self.parents)
@@ -96,9 +104,19 @@ class CandidateAggregator:
         *,
         thresholds: LevelThresholds,
         resolver: InstitutionResolver,
+        frequency_policy: FrequencyFilteringPolicy | None = None,
     ) -> None:
         self._thresholds = thresholds
         self._resolver = resolver
+        self._frequency_policy = frequency_policy or FrequencyFilteringPolicy()
+        self._near_duplicate_policy: NearDuplicateDedupPolicy | None = (
+            self._frequency_policy.near_duplicate
+            if self._frequency_policy.near_duplicate.enabled
+            else None
+        )
+        self._unknown_institution_placeholder = (
+            self._frequency_policy.unknown_institution_placeholder
+        )
         self._log = get_logger(module=__name__)
 
     def aggregate(self, items: Iterable[CandidateEvidence]) -> FrequencyAggregationResult:
@@ -122,27 +140,40 @@ class CandidateAggregator:
             bucket.total_count += max(candidate.support.count, 0)
             bucket.total_records += max(candidate.support.records, 0)
 
-            evidence.placeholder_institutions(candidate.support.institutions)
-            evidence.placeholder_records(candidate.support.records)
-
             canonical_institutions = {
                 self._resolver.resolve_identity(name)
                 for name in evidence.institutions
                 if name
             }
+            if not canonical_institutions:
+                canonical_institutions = {self._unknown_institution_placeholder}
             bucket.institutions.update(canonical_institutions)
             bucket.record_fingerprints.update(evidence.record_fingerprints)
+            for institution in canonical_institutions:
+                record_set = bucket.records_by_institution.setdefault(
+                    institution, set()
+                )
+                record_set.update(evidence.record_fingerprints)
 
         kept: List[FrequencyDecision] = []
         dropped: List[FrequencyDecision] = []
+        institutions_histogram: Dict[int, Counter[int]] = defaultdict(Counter)
+        dropped_insufficient_support = 0
         for bucket_key, bucket in buckets.items():
+            self._apply_near_duplicate_dedup(bucket)
             candidate = bucket.as_candidate()
             threshold = self._threshold_for_level(bucket.level)
             support = candidate.support
+            institutions_histogram[bucket.level][support.institutions] += 1
             passed = (
                 support.institutions >= threshold.min_institutions
-                and support.count >= threshold.min_src_count
+                and support.records >= threshold.min_src_count
             )
+            if not passed and (
+                support.institutions < threshold.min_institutions
+                or support.records < threshold.min_src_count
+            ):
+                dropped_insufficient_support += 1
             rationale = self._build_rationale(candidate, threshold, passed, bucket)
             weight = support.weight()
             decision = FrequencyDecision(
@@ -164,18 +195,25 @@ class CandidateAggregator:
                 parents=list(bucket.parents),
                 passed=passed,
                 institutions=support.institutions,
-                src_count=support.count,
+                records=support.records,
+                raw_count=support.count,
             )
 
         kept.sort(key=lambda d: (d.candidate.level, d.candidate.normalized, tuple(d.candidate.parents)))
         dropped.sort(key=lambda d: (d.candidate.level, d.candidate.normalized, tuple(d.candidate.parents)))
 
+        histogram_stats = {
+            str(level): {str(bucket_count): count for bucket_count, count in sorted(counter.items())}
+            for level, counter in institutions_histogram.items()
+        }
         stats = {
             "candidates_in": total_inputs,
             "aggregated_groups": len(buckets),
             "kept": len(kept),
             "dropped": len(dropped),
             "institutions_unique": sum(len(bucket.institutions) for bucket in buckets.values()),
+            "dropped_insufficient_support": dropped_insufficient_support,
+            "institutions_histogram": histogram_stats,
         }
         return FrequencyAggregationResult(kept=kept, dropped=dropped, stats=stats)
 
@@ -211,7 +249,8 @@ class CandidateAggregator:
         reasons = [
             (
                 f"institutions={support.institutions} (min {threshold.min_institutions}), "
-                f"sources={support.count} (min {threshold.min_src_count}), "
+                f"records={support.records} (min {threshold.min_src_count}), "
+                f"count={support.count}, "
                 f"weight={support.weight():.2f}"
             ),
             "institutions_list=" + ", ".join(sorted(bucket.institutions)) if bucket.institutions else "institutions_list=<unknown>",
@@ -225,6 +264,43 @@ class CandidateAggregator:
                 "min_src_count": float(threshold.min_src_count),
             },
         )
+
+    def _apply_near_duplicate_dedup(self, bucket: _AggregationBucket) -> None:
+        policy = self._near_duplicate_policy
+        if not policy or not bucket.records_by_institution:
+            return
+
+        deduped_records: Set[str] = set()
+        updated_mapping: Dict[str, Set[str]] = {}
+        for institution, records in bucket.records_by_institution.items():
+            if not records:
+                updated_mapping[institution] = set()
+                continue
+            seen_keys: Dict[str, str] = {}
+            collapsed_records: Set[str] = set()
+            for fingerprint in sorted(records):
+                key = self._fingerprint_key(fingerprint, policy)
+                if key not in seen_keys:
+                    seen_keys[key] = fingerprint
+                    collapsed_records.add(fingerprint)
+            updated_mapping[institution] = collapsed_records
+            deduped_records.update(collapsed_records)
+
+        bucket.records_by_institution = updated_mapping
+        bucket.record_fingerprints = deduped_records
+
+    def _fingerprint_key(self, fingerprint: str, policy: NearDuplicateDedupPolicy) -> str:
+        key = fingerprint
+        for delimiter in policy.prefix_delimiters:
+            if delimiter and delimiter in key:
+                prefix = key.split(delimiter, 1)[0]
+                if len(prefix) >= policy.min_prefix_length:
+                    key = prefix
+                    break
+        if policy.strip_numeric_suffix:
+            key = re.sub(r"[-_]?v?\d+$", "", key)
+            key = re.sub(r"[-_][0-9a-f]{6,}$", "", key)
+        return key
 
 
 __all__ = [

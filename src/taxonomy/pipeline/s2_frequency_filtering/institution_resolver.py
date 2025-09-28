@@ -58,6 +58,9 @@ class InstitutionResolver:
             logger.debug("Missing institution name encountered", placeholder=placeholder)
             return placeholder
 
+        if institution_name.strip().lower() == "unknown":
+            return "placeholder::unknown"
+
         key = self._normalize_key(institution_name)
         if key in self._cache:
             return self._cache[key]

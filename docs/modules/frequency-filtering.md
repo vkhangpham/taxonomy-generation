@@ -12,31 +12,33 @@ Inputs/Outputs (semantic)
 - Output: Candidate[] (kept) with support metrics and rationale; dropped list with reasons
 
 Metrics
-- inst_count: number of distinct institutions supporting the (level, normalized, parent_lineage) key
-- src_count: number of distinct SourceRecords
-- weight: w1*inst_count + w2*log(1+src_count) (defaults w1=1.0, w2=0.3)
+- inst_count: number of distinct institutions supporting the (level, normalized, parent_lineage) key (placeholder::unknown when missing)
+- record_count: number of distinct SourceRecords after near-duplicate collapsing per institution
+- raw_count: total source observations (for auditing only)
+- weight: w1*inst_count + w2*log(1+record_count) (defaults w1=1.0, w2=0.3)
 
 Thresholds (defaults; tune with eval set)
 - L0 ≥ 1 inst
 - L1 ≥ 1 inst
 - L2 ≥ 2 inst
-- L3 ≥ 2 inst and src_count ≥ 3
+- L3 ≥ 2 inst and record_count ≥ 3
 
 Rules & Invariants
 - Distinct institution definition must be stable (campus vs. system); document policy.
-- De‑duplicate near-identical pages within the same institution before counting.
+- Substitute a stable placeholder (`placeholder::unknown`) when evidence lacks institution metadata.
+- De-duplicate near-identical pages within the same institution before counting; policy-driven delimiters and suffix stripping control collapse.
 - Keep rationale: store counts, institution list (sampled if large), and representative snippets.
 
-Core Logic
-- Aggregate by key; compute metrics; compare with per‑level thresholds.
-- Produce explainable rationale entries: kept/dropped with threshold references.
+- Aggregate by key; compute metrics; compare with per-level thresholds.
+- Collapse near-duplicate record fingerprints per institution when enabled by policy.
+- Produce explainable rationale entries: kept/dropped with threshold references (institutions, records, raw observations).
 
 Failure Handling
 - On missing provenance, treat as single‑institution fallback; flag low confidence.
 
 Observability
-- Counters: candidates_in, kept, dropped_insufficient_support, policy_exceptions.
-- Distributions: inst_count histogram by level.
+- Counters: candidates_in, aggregated_groups, kept, dropped, dropped_insufficient_support, institutions_unique.
+- Distributions: inst_count histogram by level (stored under `institutions_histogram`).
 
 Acceptance Tests
 - Candidates with identical normalized forms across ≥2 institutions pass at L2/L3.
