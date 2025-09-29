@@ -2,9 +2,33 @@
 
 from __future__ import annotations
 
-from typing import List
+import re
+from typing import Any, Iterable, List
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, PrivateAttr, field_validator, model_validator
+from pydantic_core import PydanticUndefined
+
+
+def _sanitize_string_sequence(value: Any) -> List[str]:
+    """Normalise diverse inputs into a trimmed list of strings."""
+
+    if value is None or value is PydanticUndefined:
+        return []
+    if isinstance(value, str):
+        items = [value]
+    elif isinstance(value, Iterable) and not isinstance(value, (bytes, bytearray)):
+        items = list(value)
+    else:
+        items = [value]
+
+    cleaned: List[str] = []
+    for item in items:
+        if not isinstance(item, str):
+            raise TypeError("Expected string entries, but received non-string input")
+        stripped = item.strip()
+        if stripped:
+            cleaned.append(stripped)
+    return cleaned
 
 
 class NearDuplicateDedupPolicy(BaseModel):
@@ -26,8 +50,8 @@ class NearDuplicateDedupPolicy(BaseModel):
     )
 
     @field_validator("prefix_delimiters", mode="before")
-    def _normalize_delimiters(value: List[str]) -> List[str]:
-        return [delimiter.strip() for delimiter in value if delimiter and delimiter.strip()]
+    def _normalize_delimiters(cls, value: Any) -> List[str]:
+        return _sanitize_string_sequence(value)
 
 
 class FrequencyFilteringPolicy(BaseModel):
@@ -133,8 +157,8 @@ class DeduplicationPolicy(BaseModel):
     )
 
     @field_validator("heuristic_suffixes", mode="before")
-    def _strip_suffixes(value: List[str]) -> List[str]:
-        return [suffix.strip() for suffix in value if suffix and suffix.strip()]
+    def _strip_suffixes(cls, value: Any) -> List[str]:
+        return _sanitize_string_sequence(value)
 
 
 class RawExtractionPolicy(BaseModel):
@@ -180,9 +204,36 @@ class RawExtractionPolicy(BaseModel):
     )
     preserve_document_order: bool = Field(default=True)
 
+    _compiled_boilerplate_patterns: List[re.Pattern[str]] = PrivateAttr(default_factory=list)
+    _compiled_section_header_patterns: List[re.Pattern[str]] = PrivateAttr(default_factory=list)
+
     @field_validator("boilerplate_patterns", "section_header_patterns", mode="before")
-    def _strip_blanks(value: List[str]) -> List[str]:
-        return [pattern for pattern in (entry.strip() for entry in value) if pattern]
+    def _strip_blanks(cls, value: Any) -> List[str]:
+        return _sanitize_string_sequence(value)
+
+    @model_validator(mode="after")
+    def _validate_regex_patterns(self) -> "RawExtractionPolicy":
+        compiled_boilerplate: List[re.Pattern[str]] = []
+        for index, pattern in enumerate(self.boilerplate_patterns):
+            try:
+                compiled_boilerplate.append(re.compile(pattern))
+            except re.error as exc:  # pragma: no cover - explicit error path
+                raise ValueError(
+                    f"Invalid regex in boilerplate_patterns[{index}] ({pattern!r}): {exc}"
+                ) from exc
+
+        compiled_section_headers: List[re.Pattern[str]] = []
+        for index, pattern in enumerate(self.section_header_patterns):
+            try:
+                compiled_section_headers.append(re.compile(pattern))
+            except re.error as exc:  # pragma: no cover - explicit error path
+                raise ValueError(
+                    f"Invalid regex in section_header_patterns[{index}] ({pattern!r}): {exc}"
+                ) from exc
+
+        self._compiled_boilerplate_patterns = compiled_boilerplate
+        self._compiled_section_header_patterns = compiled_section_headers
+        return self
 
     @model_validator(mode="after")
     def _validate_length_bounds(self) -> "RawExtractionPolicy":
