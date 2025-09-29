@@ -1,0 +1,260 @@
+{
+  "captured_at": "2025-09-28T18:52:41.603991Z",
+  "checksum": "41c71565fdfc953c94a4af231d485f190cb82660e234e4af87502fc788925950",
+  "counters": {
+    "Dedup": {
+      "components": 0,
+      "edges_kept": 0,
+      "merges_applied": 0,
+      "pairs_compared": 0
+    },
+    "Disambig": {
+      "collisions_detected": 0,
+      "deferred": 0,
+      "splits_made": 0
+    },
+    "Hierarchy": {
+      "edges_built": 0,
+      "nodes_in": 1,
+      "nodes_kept": 1,
+      "orphans": 0,
+      "violations": 0
+    },
+    "S0": {
+      "blocks_kept": 0,
+      "blocks_total": 0,
+      "by_language": {},
+      "pages_failed": 0,
+      "pages_seen": 0
+    },
+    "S1": {
+      "candidates_out": 4,
+      "invalid_json": 0,
+      "records_in": 4,
+      "retries": 0
+    },
+    "S2": {
+      "candidates_in": 1,
+      "dropped_insufficient_support": 0,
+      "kept": 1
+    },
+    "S3": {
+      "checked": 1,
+      "failed_llm": 0,
+      "failed_rule": 0,
+      "passed_llm": 1,
+      "passed_rule": 1
+    },
+    "Validation": {
+      "checked": 0,
+      "llm_failed": 0,
+      "passed_all": 0,
+      "rule_failed": 0,
+      "web_failed": 0
+    }
+  },
+  "evidence": {
+    "samples": {
+      "S1": [
+        {
+          "category": "extraction",
+          "outcome": "success",
+          "payload": {
+            "level": 3
+          },
+          "sequence": 4
+        }
+      ]
+    },
+    "total_considered": {
+      "S1": 4
+    }
+  },
+  "operations": [
+    {
+      "operation": "start",
+      "outcome": "success",
+      "payload": {},
+      "phase": "S1",
+      "sequence": 1
+    },
+    {
+      "operation": "complete",
+      "outcome": "success",
+      "payload": {
+        "candidates": 1,
+        "elapsed_seconds": 1.1084135621786118e-05,
+        "level": 0,
+        "records": 1
+      },
+      "phase": "S1",
+      "sequence": 2
+    },
+    {
+      "operation": "start",
+      "outcome": "success",
+      "payload": {},
+      "phase": "S1",
+      "sequence": 3
+    },
+    {
+      "operation": "complete",
+      "outcome": "success",
+      "payload": {
+        "candidates": 1,
+        "elapsed_seconds": 8.167000487446785e-06,
+        "level": 1,
+        "records": 1
+      },
+      "phase": "S1",
+      "sequence": 4
+    },
+    {
+      "operation": "start",
+      "outcome": "success",
+      "payload": {},
+      "phase": "S1",
+      "sequence": 5
+    },
+    {
+      "operation": "complete",
+      "outcome": "success",
+      "payload": {
+        "candidates": 1,
+        "elapsed_seconds": 6.500165909528732e-06,
+        "level": 2,
+        "records": 1
+      },
+      "phase": "S1",
+      "sequence": 6
+    },
+    {
+      "operation": "start",
+      "outcome": "success",
+      "payload": {},
+      "phase": "S1",
+      "sequence": 7
+    },
+    {
+      "operation": "complete",
+      "outcome": "success",
+      "payload": {
+        "candidates": 1,
+        "elapsed_seconds": 7.4999406933784485e-06,
+        "level": 3,
+        "records": 1
+      },
+      "phase": "S1",
+      "sequence": 8
+    },
+    {
+      "operation": "start",
+      "outcome": "success",
+      "payload": {},
+      "phase": "S2",
+      "sequence": 9
+    },
+    {
+      "operation": "complete",
+      "outcome": "success",
+      "payload": {
+        "elapsed_seconds": 3.5830307751893997e-06,
+        "level": "consolidation",
+        "records": 0
+      },
+      "phase": "S2",
+      "sequence": 10
+    },
+    {
+      "operation": "start",
+      "outcome": "success",
+      "payload": {},
+      "phase": "S3",
+      "sequence": 11
+    },
+    {
+      "operation": "complete",
+      "outcome": "success",
+      "payload": {
+        "converged": true,
+        "elapsed_seconds": 5.292007699608803e-06,
+        "iterations": 1
+      },
+      "phase": "S3",
+      "sequence": 12
+    },
+    {
+      "operation": "start",
+      "outcome": "success",
+      "payload": {},
+      "phase": "Hierarchy",
+      "sequence": 13
+    },
+    {
+      "operation": "complete",
+      "outcome": "success",
+      "payload": {
+        "elapsed_seconds": 4.292000085115433e-06,
+        "validation_nodes": 1
+      },
+      "phase": "Hierarchy",
+      "sequence": 14
+    }
+  ],
+  "performance": {
+    "Hierarchy": {
+      "elapsed_seconds": 4.292000085115433e-06,
+      "validation_nodes": 1
+    },
+    "S1": {
+      "candidates": 1,
+      "elapsed_seconds": 7.4999406933784485e-06,
+      "level": 3,
+      "records": 1
+    },
+    "S2": {
+      "elapsed_seconds": 3.5830307751893997e-06,
+      "level": "consolidation",
+      "records": 0
+    },
+    "S3": {
+      "converged": true,
+      "elapsed_seconds": 5.292007699608803e-06,
+      "iterations": 1
+    }
+  },
+  "prompt_versions": {},
+  "quarantine": {
+    "by_reason": {},
+    "items": [],
+    "total": 0
+  },
+  "seeds": {
+    "level0_excel.random_seed": 20230927,
+    "llm.random_seed": 12345,
+    "settings.random_seed": 20250927
+  },
+  "snapshot_timestamp": 1759085561.603991,
+  "thresholds": {
+    "level_thresholds.level_0": {
+      "min_institutions": 1,
+      "min_src_count": 1,
+      "weight_formula": "1.0*inst_count + 0.3*log(1+src_count)"
+    },
+    "level_thresholds.level_1": {
+      "min_institutions": 1,
+      "min_src_count": 1,
+      "weight_formula": "1.0*inst_count + 0.3*log(1+src_count)"
+    },
+    "level_thresholds.level_2": {
+      "min_institutions": 2,
+      "min_src_count": 1,
+      "weight_formula": "1.0*inst_count + 0.3*log(1+src_count)"
+    },
+    "level_thresholds.level_3": {
+      "min_institutions": 2,
+      "min_src_count": 3,
+      "weight_formula": "1.0*inst_count + 0.3*log(1+src_count)"
+    }
+  }
+}
