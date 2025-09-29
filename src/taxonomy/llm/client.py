@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
-import time
+import logging
+import os
 import threading
+import time
 from pathlib import Path
 from typing import Any, Dict, Mapping, Optional
 
@@ -46,6 +48,8 @@ class LLMClient:
         self._validator = validator
         self._metrics = metrics or MetricsCollector()
         self._metrics_enabled = settings.observability.metrics_enabled
+        self._logger = logging.getLogger(__name__)
+        self._capture_raw_failures = _should_capture_raw_failures()
         self._provider_manager.configure_policy_defaults(
             top_p=self._settings.nucleus_top_p,
             json_mode=self._settings.json_mode,
@@ -140,7 +144,16 @@ class LLMClient:
                     latency_ms=provider_response.performance.latency_ms,
                 )
 
+            raw_preview = _summarize_raw(provider_response.content)
             last_error = validation.error or "Unknown validation error"
+            if self._capture_raw_failures:
+                self._logger.warning(
+                    "LLM validation failed for %s (attempt %d): %s",
+                    prompt_meta.prompt_key,
+                    attempt,
+                    raw_preview,
+                )
+                last_error = f"{last_error} | raw_preview={raw_preview}"
             failures += 1
             self._metric("invalid_json")
 
@@ -310,6 +323,22 @@ def _build_default_client(config_path: Optional[Path]) -> LLMClient:
         validator=validator,
         metrics=metrics,
     )
+
+
+def _should_capture_raw_failures() -> bool:
+    value = os.getenv("TAXONOMY_AUDIT_CAPTURE_RAW")
+    if value is None:
+        return False
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _summarize_raw(raw: str, *, limit: int = 500) -> str:
+    preview = (raw or "").strip()
+    if not preview:
+        return "<empty>"
+    if len(preview) > limit:
+        return preview[:limit] + "…"
+    return preview
 
 
 __all__ = ["LLMClient", "run", "get_default_client"]
