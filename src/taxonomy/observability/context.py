@@ -267,6 +267,14 @@ class ObservabilityContext:
         outcome: str = "success",
         payload: t.Mapping[str, t.Any] | None = None,
     ) -> OperationLogEntry:
+        """Record an operation outcome and return a deterministic log entry.
+
+        The internal sequence counter always increments, even when
+        ``max_operation_log_entries`` is configured to ``0``. In that case the
+        returned :class:`OperationLogEntry` enables downstream components to
+        retain API parity while no entries are retained in memory.
+        """
+
         with self._lock:
             self._operation_sequence += 1
             sanitized_payload = _sanitize(payload or {})
@@ -289,6 +297,12 @@ class ObservabilityContext:
         phase: str,
         metrics: t.Mapping[str, t.Any],
     ) -> None:
+        """Store performance metrics for a phase after sanitising the payload.
+
+        All values are normalised via :func:`_sanitize` so downstream consumers
+        receive JSON-serialisable structures regardless of the input mapping.
+        """
+
         if not self._performance_tracking_enabled:
             return
         with self._lock:
@@ -530,7 +544,13 @@ class PhaseHandle:
         outcome: str = "success",
         payload: t.Mapping[str, t.Any] | None = None,
     ) -> OperationLogEntry:
-        """Log an operation outcome for this phase with a JSON-safe payload."""
+        """Log an operation outcome for this phase with a JSON-safe payload.
+
+        When the context disables in-memory operation retention by setting
+        ``max_operation_log_entries`` to ``0``, this still returns a populated
+        :class:`OperationLogEntry` so callers can emit events that remain
+        sequence-aware.
+        """
 
         return self._context.record_operation(
             phase=self.phase,
