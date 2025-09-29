@@ -86,13 +86,21 @@ class TaxonomyExtractor(dspy.Module):
         temperature: float | None = None,
     ) -> None:
         super().__init__()
-        self.instructions = instructions.strip() if instructions else _DEFAULT_INSTRUCTIONS
+        self.instructions = (
+            instructions.strip() if instructions else _DEFAULT_INSTRUCTIONS
+        )
         self.few_shot_k = max(0, int(few_shot_k))
-        self.constraint_variant = constraint_variant if constraint_variant in _CONSTRAINT_VARIANTS else "baseline"
+        self.constraint_variant = (
+            constraint_variant
+            if constraint_variant in _CONSTRAINT_VARIANTS
+            else "baseline"
+        )
         self.ordering_seed = ordering_seed
         self.temperature = temperature
         self._example_bank: List[dspy.Example] = list(few_shot_examples or [])
-        self.prog = dspy.ChainOfThought(TaxonomyExtractionSignature, instructions=self.instructions)
+        self.prog = dspy.ChainOfThought(
+            TaxonomyExtractionSignature, instructions=self.instructions
+        )
 
     def configure_examples(self, examples: Sequence[dspy.Example]) -> None:
         """Replace the example bank used for few-shot conditioning."""
@@ -133,27 +141,37 @@ class TaxonomyExtractor(dspy.Module):
         constraints = _CONSTRAINT_VARIANTS[self.constraint_variant]
         few_shot_block = ""
         if self._example_bank and self.few_shot_k > 0:
-            few_shot_block = "\n" + textwrap.dedent(
-                """
-                Few-shot exemplars (read-only):
-                [
-                {% for example in exemplars %}
-                  {
-                    "institution": {{ example.institution | tojson }},
-                    "level": {{ example.level | int }},
-                    "source_text": {{ example.source_text | replace('\n', ' ') | tojson }},
-                    "gold_labels": {{ example.gold_labels | tojson }}
-                  }{% if not loop.last %},{% endif %}
-                {% endfor %}
-                ]
-                """
-            ).strip("\n")
+            level_payloads: dict[int, str] = {}
+            for normalized_level in range(4):
+                serialized = self._render_exemplars(normalized_level)
+                try:
+                    parsed = json.loads(serialized)
+                except json.JSONDecodeError:
+                    parsed = []
+                level_payloads[normalized_level] = json.dumps(
+                    parsed,
+                    ensure_ascii=True,
+                    indent=2,
+                )
+            fallback_payload = level_payloads.get(0, "[]")
+            block_lines = ["Few-shot exemplars (read-only):"]
+            for index, normalized_level in enumerate(range(4)):
+                keyword = "if" if index == 0 else "elif"
+                payload = level_payloads.get(normalized_level, fallback_payload)
+                block_lines.append(
+                    f"{{% {keyword} level | int == {normalized_level} %}}"
+                )
+                block_lines.append(textwrap.indent(payload, "  "))
+            block_lines.append("{% else %}")
+            block_lines.append(textwrap.indent(fallback_payload, "  "))
+            block_lines.append("{% endif %}")
+            few_shot_block = "\n" + "\n".join(block_lines)
         template_lines = [
             "You are a deterministic extraction specialist.",
             self.instructions.strip(),
             "Institution: {{ institution }}",
             "Hierarchy level: {{ level }}",
-            "Source material:\n\"\"\"\n{{ source_text }}\n\"\"\"",
+            'Source material:\n"""\n{{ source_text }}\n"""',
             constraints,
             few_shot_block,
             "Respond with JSON only.",
