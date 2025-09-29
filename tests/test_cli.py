@@ -10,6 +10,7 @@ import pytest
 from typer.testing import CliRunner
 
 from taxonomy.cli.main import app
+from taxonomy.cli.common import _partition_global_arguments
 
 
 @pytest.fixture()
@@ -27,6 +28,30 @@ def cli_env(tmp_path: Path) -> dict[str, str]:
         "TAXONOMY_SETTINGS__PATHS__LOGS_DIR": str(tmp_path / "logs"),
         "TAXONOMY_SETTINGS__PATHS__METADATA_DIR": str(tmp_path / "metadata"),
     }
+
+
+def test_partition_global_arguments_splits_flags_and_segments() -> None:
+    global_args, command_args = _partition_global_arguments(
+        ["--environment", "development", "--resume-phase", "S1"]
+    )
+
+    assert global_args == ["--environment", "development"]
+    assert command_args == ["--resume-phase", "S1"]
+
+
+def test_partition_global_arguments_handles_repeatable_overrides() -> None:
+    global_args, command_args = _partition_global_arguments(
+        ["--override", "policy.alpha=1", "-o", "policy.beta=2", "--override=policy.gamma=3"]
+    )
+
+    assert global_args == [
+        "--override",
+        "policy.alpha=1",
+        "-o",
+        "policy.beta=2",
+        "--override=policy.gamma=3",
+    ]
+    assert command_args == []
 
 
 def test_pipeline_generate_invokes_stage(monkeypatch: pytest.MonkeyPatch, runner: CliRunner, cli_env: dict[str, str], tmp_path: Path) -> None:

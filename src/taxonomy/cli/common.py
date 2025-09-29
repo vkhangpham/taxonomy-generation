@@ -156,12 +156,49 @@ def resolve_path(path: str | Path, *, must_exist: bool = True) -> Path:
         raise CLIError(f"Path does not exist: {target}")
     return target
 
+_GLOBAL_OPTIONS_WITH_VALUES = {"--environment", "-e", "--override", "-o", "--run-id"}
+_GLOBAL_FLAG_OPTIONS = {"--verbose", "-v", "--no-observability"}
+
+
+def _partition_global_arguments(arguments: Iterable[str]) -> tuple[list[str], list[str]]:
+    """Split global CLI options from command-specific arguments."""
+
+    tokens = list(arguments)
+    global_args: list[str] = []
+    command_args: list[str] = []
+    index = 0
+
+    while index < len(tokens):
+        token = tokens[index]
+        if token == "--":
+            command_args.extend(tokens[index:])
+            break
+
+        option, has_equals, _ = token.partition("=")
+        if option in _GLOBAL_OPTIONS_WITH_VALUES:
+            global_args.append(token)
+            if not has_equals:
+                index += 1
+                if index < len(tokens):
+                    global_args.append(tokens[index])
+                else:  # pragma: no cover - delegated to Typer for validation
+                    break
+        elif option in _GLOBAL_FLAG_OPTIONS:
+            global_args.append(token)
+        else:
+            command_args.append(token)
+
+        index += 1
+
+    return global_args, command_args
+
 
 def run_subcommand(*segments: str) -> None:
     """Invoke the main Typer app with ``segments`` prefixed to ``sys.argv``."""
 
     from .main import app as main_app
 
-    args = list(segments) + sys.argv[1:]
+    global_args, command_args = _partition_global_arguments(sys.argv[1:])
+    args = global_args + list(segments) + command_args
     exit_code = main_app(prog_name="taxonomy", args=args, standalone_mode=False) or 0
     raise SystemExit(exit_code)
