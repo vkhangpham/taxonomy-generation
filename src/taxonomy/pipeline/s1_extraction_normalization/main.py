@@ -64,23 +64,41 @@ def extract_candidates(
     obs_context = observability or extractor.observability
     snapshot_before = obs_context.snapshot() if obs_context is not None else None
     before_counters = snapshot_before.counters.get("S1", {}) if snapshot_before else {}
-    before_op_sequence = 0
-    if snapshot_before:
-        s1_ops_before = [
-            op for op in snapshot_before.operations
-            if isinstance(op, dict) and op.get("phase") == "S1"
-        ]
-        if s1_ops_before:
-            before_op_sequence = int(s1_ops_before[-1].get("sequence", 0))
+
+    def _latest_sequence(entries: object) -> int:
+        """Return the most recent S1 sequence from *entries* without copying."""
+
+        if not isinstance(entries, Sequence) or isinstance(entries, (str, bytes, bytearray)):
+            return 0
+        for entry in reversed(entries):
+            if not isinstance(entry, dict) or entry.get("phase") != "S1":
+                continue
+            try:
+                return int(entry.get("sequence", 0))
+            except (TypeError, ValueError):
+                continue
+        return 0
+
+    def _recent_s1_entries(entries: object, *, baseline: int) -> Iterator[dict[str, object]]:
+        """Yield S1 entries with a sequence greater than *baseline*."""
+
+        if not isinstance(entries, Sequence) or isinstance(entries, (str, bytes, bytearray)):
+            return
+        for entry in reversed(entries):
+            if not isinstance(entry, dict) or entry.get("phase") != "S1":
+                continue
+            try:
+                sequence = int(entry.get("sequence", 0))
+            except (TypeError, ValueError):
+                continue
+            if sequence <= baseline:
+                break
+            yield entry
+
+    before_op_sequence = _latest_sequence(snapshot_before.operations) if snapshot_before else 0
     before_quarantine_sequence = 0
     if snapshot_before:
-        items_before = snapshot_before.quarantine.get("items", [])
-        s1_items_before = [
-            it for it in items_before
-            if isinstance(it, dict) and it.get("phase") == "S1"
-        ]
-        if s1_items_before:
-            before_quarantine_sequence = int(s1_items_before[-1].get("sequence", 0))
+        before_quarantine_sequence = _latest_sequence(snapshot_before.quarantine.get("items", []))
     previous_parents = list(previous_parents or [])
     if previous_parents:
         parent_index.build_index(previous_parents)
@@ -106,26 +124,53 @@ def extract_candidates(
             if resume_path is not None:
                 _write_resume_checkpoint(resume_path, processed_records, aggregated_state)
 
-        provider_errors = sum(
-            1
-            for entry in snapshot_after.operations
-            if isinstance(entry, dict)
-            and entry.get("phase") == "S1"
-            and entry.get("operation") == "provider_error"
-            and int(entry.get("sequence", 0)) > before_op_sequence
-        )
+        candidates = processor._materialize(aggregated_state.values())
+
+        output_destination: Path | None = None
+        if output_path is not None:
+            output_destination = _stream_candidates(candidates, output_path)
+
+        snapshot_after = obs_context.snapshot() if obs_context is not None else None
+
+        def _delta(counter_name: str) -> int:
+            if snapshot_after is None:
+                return 0
+            after_raw = snapshot_after.counters.get("S1", {}).get(counter_name, 0)
+            before_raw = before_counters.get(counter_name, 0)
+            try:
+                after_value = int(after_raw)
+            except (TypeError, ValueError):
+                after_value = 0
+            try:
+                before_value = int(before_raw)
+            except (TypeError, ValueError):
+                before_value = 0
+            return after_value - before_value
+
+        provider_errors = 0
         quarantined = 0
-        items_after = snapshot_after.quarantine.get("items", [])
-        for item in items_after:
-            if (
-                isinstance(item, dict)
-                and item.get("phase") == "S1"
-                and int(item.get("sequence", 0)) > before_quarantine_sequence
-            ):
-                quarantined += 1
+        if snapshot_after is not None:
+            provider_errors = sum(
+                1
+                for entry in _recent_s1_entries(snapshot_after.operations, baseline=before_op_sequence)
+                if entry.get("operation") == "provider_error"
+            )
+            quarantined = sum(
+                1
+                for _ in _recent_s1_entries(
+                    snapshot_after.quarantine.get("items", []),
+                    baseline=before_quarantine_sequence,
+                )
+            )
+
+        if snapshot_after is not None:
+            stats = {
+                "records_in": _delta("records_in"),
+                "records_processed_total": processed_records,
+                "candidates_out": _delta("candidates_out"),
                 "invalid_json": _delta("invalid_json"),
                 "quarantined": quarantined,
-                "provider_errors": int(provider_errors),
+                "provider_errors": provider_errors,
                 "retries": _delta("retries"),
                 "final_candidates": len(candidates),
             }
@@ -141,13 +186,25 @@ def extract_candidates(
                 "retries": metrics.retries,
                 "final_candidates": len(candidates),
             }
+
         config_used = {
             "policy_version": cfg.policies.policy_version,
             "level": level,
             "batch_size": batch_size,
         }
-        metadata = generate_metadata(stats, config_used)
-        Path(metadata_path).write_text(json.dumps(metadata, indent=2) + "\n", encoding="utf-8")
+
+        metadata_destination: Path | None
+        if metadata_path is not None:
+            metadata_destination = Path(metadata_path)
+        elif output_destination is not None:
+            metadata_destination = Path(f"{output_destination}.metadata.json")
+        else:
+            metadata_destination = None
+
+        if metadata_destination is not None:
+            metadata_destination.parent.mkdir(parents=True, exist_ok=True)
+            metadata = generate_metadata(stats, config_used)
+            metadata_destination.write_text(json.dumps(metadata, indent=2) + "\n", encoding="utf-8")
 
     if resume_path is not None:
         _write_resume_checkpoint(resume_path, processed_records, aggregated_state)
