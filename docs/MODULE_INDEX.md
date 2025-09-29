@@ -4,6 +4,7 @@ Purpose
 - Map `src/taxonomy/` packages to module docs, track coverage and status.
 
 Legend: ✅ Complete • 📝 Needs Update • ❌ Missing
+README Legend: ✅ README present • ❌ Missing README
 
 Pipeline Steps
 - `pipeline/s0_raw_extraction` → `docs/modules/raw-extraction.md` — ✅
@@ -39,6 +40,7 @@ CLI
 Notes
 - All module docs should conform to `docs/DOCUMENTATION_GUIDE.md` and cross‑reference `docs/logic-spec.md`.
 - Status should be updated when behavior changes, policies bump, or interfaces drift.
+- Per‑module READMEs provide quick reference and practical usage; detailed specs live in `docs/modules/`.
 
 ## Per‑Module READMEs (Quick Reference)
 
@@ -46,18 +48,18 @@ Purpose
 - Track in‑tree `README.md` coverage for developer quick reference alongside detailed docs above.
 
 Pipeline Steps (README path → status)
-- `src/taxonomy/pipeline/s0_raw_extraction/README.md` — ❌ Missing
-- `src/taxonomy/pipeline/s1_extraction_normalization/README.md` — ❌ Missing
-- `src/taxonomy/pipeline/s2_frequency_filtering/README.md` — ❌ Missing
-- `src/taxonomy/pipeline/s3_token_verification/README.md` — ❌ Missing
-- `src/taxonomy/pipeline/deduplication/README.md` — ❌ Missing
-- `src/taxonomy/pipeline/disambiguation/README.md` — ❌ Missing
-- `src/taxonomy/pipeline/validation/README.md` — ❌ Missing
-- `src/taxonomy/pipeline/hierarchy_assembly/README.md` — ❌ Missing
+- `src/taxonomy/pipeline/s0_raw_extraction/README.md` — ✅ Complete
+- `src/taxonomy/pipeline/s1_extraction_normalization/README.md` — ✅ Complete
+- `src/taxonomy/pipeline/s2_frequency_filtering/README.md` — ✅ Complete
+- `src/taxonomy/pipeline/s3_token_verification/README.md` — ✅ Complete
+- `src/taxonomy/pipeline/deduplication/README.md` — ✅ Complete
+- `src/taxonomy/pipeline/disambiguation/README.md` — ✅ Complete
+- `src/taxonomy/pipeline/validation/README.md` — ✅ Complete
+- `src/taxonomy/pipeline/hierarchy_assembly/README.md` — ✅ Complete
 
 Orchestration & Abstractions
-- `src/taxonomy/orchestration/README.md` — ❌ Missing
-- `src/taxonomy/pipeline/README.md` — ❌ Missing
+- `src/taxonomy/orchestration/README.md` — ✅ Complete
+- `src/taxonomy/pipeline/README.md` — ✅ Complete
 
 Cross‑Cutting Services
 - `src/taxonomy/llm/README.md` — ❌ Missing
