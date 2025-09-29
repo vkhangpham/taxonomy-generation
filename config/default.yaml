@@ -9,6 +9,8 @@ paths:
 observability:
   quarantine_enabled: false
   quarantine_dir: metadata/quarantine
+audit_mode:
+  enabled: false
 policies:
   policy_version: "0.1"
   level_thresholds:

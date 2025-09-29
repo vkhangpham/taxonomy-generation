@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from contextlib import nullcontext
 from dataclasses import dataclass, field
+import inspect
 from time import perf_counter
 from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence
 
@@ -26,6 +27,7 @@ class PhaseContext:
     settings: Settings
     run_id: str
     observability: ObservabilityContext
+    audit_mode: bool
     state: Dict[str, Any] = field(default_factory=dict)
 
     def record(self, phase: str, payload: Dict[str, Any]) -> None:
@@ -74,6 +76,7 @@ class PhaseManager:
         finalizer: PhaseCallable,
         resume_handler: PhaseCallable | None = None,
         max_post_processing_iterations: int = 5,
+        audit_mode: bool = False,
     ) -> None:
         self._settings = settings
         self._checkpoint_manager = checkpoint_manager
@@ -88,10 +91,12 @@ class PhaseManager:
             policy=settings.policies.observability,
         )
         manifest.attach_observability(self._observability)
+        self._audit_mode = audit_mode
         self._context = PhaseContext(
             settings=settings,
             run_id=checkpoint_manager.run_id,
             observability=self._observability,
+            audit_mode=audit_mode,
         )
         self._max_iterations = max_post_processing_iterations
 
@@ -153,7 +158,7 @@ class PhaseManager:
         _LOGGER.info("Running level generation", level=level)
 
         def _runner() -> Dict[str, Any]:
-            return generator(self._context, level)
+            return self._call_with_audit_mode(generator, self._context, level)
 
         payload = self._run_with_observability(
             phase_name,
@@ -174,7 +179,7 @@ class PhaseManager:
         _LOGGER.info("Starting consolidation phase")
 
         def _runner() -> Dict[str, Any]:
-            return self._consolidator(self._context)
+            return self._call_with_audit_mode(self._consolidator, self._context)
 
         payload = self._run_with_observability(
             self.CONSOLIDATION_PHASE,
@@ -204,7 +209,7 @@ class PhaseManager:
                 changed = False
                 iteration_payload: Dict[str, Any] = {"iteration": iterations, "results": []}
                 for processor in self._post_processors:
-                    result = processor(self._context)
+                    result = self._call_with_audit_mode(processor, self._context)
                     iteration_payload["results"].append(result)
                     changed = changed or bool(result.get("changed"))
                 history.append(iteration_payload)
@@ -240,7 +245,7 @@ class PhaseManager:
         def _runner() -> Dict[str, Any]:
             if handler is None:
                 return {"supported": False}
-            return handler(self._context)
+            return self._call_with_audit_mode(handler, self._context)
 
         payload = self._run_with_observability(
             self.RESUME_PHASE,
@@ -255,7 +260,7 @@ class PhaseManager:
         _LOGGER.info("Finalising taxonomy")
 
         def _runner() -> Dict[str, Any]:
-            return self._finalizer(self._context)
+            return self._call_with_audit_mode(self._finalizer, self._context)
 
         payload = self._run_with_observability(
             self.FINALIZATION_PHASE,
@@ -331,3 +336,28 @@ class PhaseManager:
     @property
     def observability(self) -> ObservabilityContext:
         return self._observability
+
+    def _call_with_audit_mode(
+        self,
+        func: Callable[..., Dict[str, Any]],
+        *args: Any,
+        **kwargs: Any,
+    ) -> Dict[str, Any]:
+        if self._supports_audit_mode(func):
+            kwargs = dict(kwargs)
+            kwargs.setdefault("audit_mode", self._audit_mode)
+            return func(*args, **kwargs)
+        return func(*args, **kwargs)
+
+    @staticmethod
+    def _supports_audit_mode(func: Callable[..., Any]) -> bool:
+        try:
+            signature = inspect.signature(func)
+        except (TypeError, ValueError):  # pragma: no cover - fallback for builtins
+            return False
+        if "audit_mode" in signature.parameters:
+            return True
+        return any(
+            parameter.kind == inspect.Parameter.VAR_KEYWORD
+            for parameter in signature.parameters.values()
+        )

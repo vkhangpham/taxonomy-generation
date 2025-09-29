@@ -60,6 +60,11 @@ def _generate_command(
         "--test-mode",
         help="Enable lightweight settings suited for smoke testing.",
     ),
+    audit_mode: bool = typer.Option(
+        False,
+        "--audit-mode",
+        help="Limit the selected stage to 10 items for audit verification.",
+    ),
 ) -> None:
     state = get_state(ctx)
     resolved_step = _normalise_step(step)
@@ -70,6 +75,9 @@ def _generate_command(
     output_resolved = resolve_path(output_path, must_exist=False)
 
     resume_checkpoint = resolve_path(resume_from, must_exist=True) if resume_from else None
+    effective_audit_mode = audit_mode or state.settings.audit_mode.enabled
+    if audit_mode and not state.settings.audit_mode.enabled:
+        state.settings.audit_mode.enabled = True
 
     with Progress(transient=True) as progress:
         task = progress.add_task(f"Running {resolved_step}", start=False)
@@ -80,6 +88,7 @@ def _generate_command(
                 output_resolved,
                 settings=state.settings,
                 batch_size=adjusted_batch_size,
+                audit_mode=effective_audit_mode,
             )
         elif resolved_step == "S1":
             if level is None:
@@ -92,6 +101,7 @@ def _generate_command(
                 batch_size=adjusted_batch_size,
                 settings=state.settings,
                 observability=observability,
+                audit_mode=effective_audit_mode,
             )
         elif resolved_step == "S2":
             if level is None:
@@ -102,6 +112,7 @@ def _generate_command(
                 output_path=output_resolved,
                 settings=state.settings,
                 observability=observability,
+                audit_mode=effective_audit_mode,
             )
         else:  # S3
             if level is None:
@@ -111,6 +122,7 @@ def _generate_command(
                 level=level,
                 output_path=output_resolved,
                 settings=state.settings,
+                audit_mode=effective_audit_mode,
             )
         progress.update(task, completed=1)
 

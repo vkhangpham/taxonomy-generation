@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import argparse
 import json
+from itertools import islice
 from pathlib import Path
-from typing import Iterable
+from typing import Iterable, Iterator, TypeVar
 
 from taxonomy.config.settings import Settings, get_settings
 from taxonomy.utils.logging import get_logger, logging_context
@@ -30,10 +31,12 @@ def verify_tokens(
     failed_output_path: str | Path | None = None,
     metadata_path: str | Path | None = None,
     settings: Settings | None = None,
+    audit_mode: bool = False,
 ) -> TokenVerificationResult:
     """Run S3 token verification and persist outputs."""
 
     cfg = settings or get_settings()
+    audit_mode_enabled = bool(audit_mode or cfg.audit_mode.enabled)
     log = get_logger(module=__name__)
 
     rule_engine = TokenRuleEngine(
@@ -51,6 +54,8 @@ def verify_tokens(
         candidates_path,
         level_filter=level,
     )
+    if audit_mode_enabled:
+        inputs = _limit_verification_inputs(inputs)
 
     with logging_context(stage="s3", level=level):
         result = processor.process(inputs)
@@ -66,6 +71,7 @@ def verify_tokens(
             "policy_version": cfg.policies.policy_version,
             "level": level,
             "prefer_rule_over_llm": cfg.policies.single_token.prefer_rule_over_llm,
+            "audit_mode": audit_mode_enabled,
         },
         {
             "max_tokens_per_level": cfg.policies.single_token.max_tokens_per_level,
@@ -84,8 +90,18 @@ def verify_tokens(
         failed=result.stats.get("failed", 0),
         verified_path=str(verified_path),
         failed_path=str(failed_path),
+        audit_mode=audit_mode_enabled,
     )
     return result
+
+
+T = TypeVar("T")
+
+
+def _limit_verification_inputs(inputs: Iterable[T], *, limit: int = 10) -> Iterator[T]:
+    """Yield at most *limit* verification inputs."""
+
+    return islice(inputs, limit)
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -103,6 +119,11 @@ def _build_parser() -> argparse.ArgumentParser:
         dest="metadata",
         help="Optional metadata destination",
     )
+    parser.add_argument(
+        "--audit-mode",
+        action="store_true",
+        help="Limit S3 verification to 10 candidates for audit verification",
+    )
     return parser
 
 
@@ -115,6 +136,7 @@ def main(argv: list[str] | None = None) -> None:  # pragma: no cover - CLI adapt
         output_path=args.output,
         failed_output_path=args.failed_output,
         metadata_path=args.metadata,
+        audit_mode=args.audit_mode,
     )
 
 

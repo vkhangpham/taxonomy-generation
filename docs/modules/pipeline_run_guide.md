@@ -42,6 +42,7 @@
   python main.py pipeline run --environment development [--run-id 20240901-dev]
   ```
 - The orchestrator checkpoints after each phase, emits artifacts under `output/runs/<run_id>/`, and writes `run_manifest.json` summarizing outputs.
+- Audit runs: enable `audit_mode.enabled` in `config/default.yaml` (or the active environment file) to cap every stage at 10 items for quick inspection.
 - To resume after a partial failure, pass `--resume-phase <phase_token>` using the tokens listed in **Resume Phase Tokens**.
 
 ### 4. Inspect Manifests and Artifacts
@@ -70,6 +71,7 @@
   # S1 candidate extraction (requires level and prior output)
   python main.py pipeline generate --step S1 --level 1 --input output/s0/raw.jsonl --output output/s1/
   ```
+- Apply `--audit-mode` to limit the invoked stage to the first 10 records when triaging issues.
 - Use `--resume-from <checkpoint_dir>` for long-running S1 aggregations.
 - Batch sizing: `--batch-size N` (clamped to 32 in `--test-mode`).
 

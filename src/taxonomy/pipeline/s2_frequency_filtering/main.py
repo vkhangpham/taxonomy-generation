@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import argparse
 import json
+from itertools import islice
 from pathlib import Path
-from typing import Iterable
+from typing import Iterable, Iterator, TypeVar
 
 from taxonomy.config.settings import Settings, get_settings
 from taxonomy.observability import ObservabilityContext
@@ -33,6 +34,7 @@ def filter_by_frequency(
     metadata_path: str | Path | None = None,
     settings: Settings | None = None,
     observability: ObservabilityContext | None = None,
+    audit_mode: bool = False,
 ) -> FrequencyAggregationResult:
     """Run S2 frequency filtering end-to-end and write streaming outputs.
 
@@ -42,6 +44,7 @@ def filter_by_frequency(
     """
 
     cfg = settings or get_settings()
+    audit_mode_enabled = bool(audit_mode or cfg.audit_mode.enabled)
     log = get_logger(module=__name__)
 
     resolver = InstitutionResolver(policy=cfg.policies.institution_policy)
@@ -61,6 +64,8 @@ def filter_by_frequency(
         candidates_path,
         level_filter=level,
     )
+    if audit_mode_enabled:
+        evidence_stream = _limit_candidates(evidence_stream)
 
     with logging_context(stage="s2", level=level):
         result = processor.process(evidence_stream)
@@ -73,6 +78,7 @@ def filter_by_frequency(
     config_used = {
         "policy_version": cfg.policies.policy_version,
         "level": level,
+        "audit_mode": audit_mode_enabled,
     }
     processing_stats = dict(result.stats)
 
@@ -121,8 +127,18 @@ def filter_by_frequency(
         dropped=result.stats.get("dropped", 0),
         kept_path=str(kept_path),
         dropped_path=str(dropped_path),
+        audit_mode=audit_mode_enabled,
     )
     return result
+
+
+T = TypeVar("T")
+
+
+def _limit_candidates(stream: Iterable[T], *, limit: int = 10) -> Iterator[T]:
+    """Yield at most *limit* items from the candidate evidence stream."""
+
+    return islice(stream, limit)
 
 
 def _threshold_metadata(settings: Settings) -> dict:
@@ -166,6 +182,11 @@ def _build_parser() -> argparse.ArgumentParser:
         dest="metadata",
         help="Optional metadata output path",
     )
+    parser.add_argument(
+        "--audit-mode",
+        action="store_true",
+        help="Limit S2 filtering to 10 candidate evidences for audit verification",
+    )
     return parser
 
 
@@ -178,6 +199,7 @@ def main(argv: list[str] | None = None) -> None:  # pragma: no cover - CLI glue
         output_path=args.output,
         dropped_output_path=args.dropped_output,
         metadata_path=args.metadata,
+        audit_mode=args.audit_mode,
     )
 
 

@@ -302,6 +302,7 @@ class RunManifest:
                 "output_dir": str(settings.paths.output_dir),
                 "metadata_dir": str(settings.paths.metadata_dir),
             },
+            "audit_mode": settings.audit_mode.enabled,
             "policies": settings.policies.model_dump(mode="json"),
             "thresholds": thresholds,
             "seeds": seeds_as_int,

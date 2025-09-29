@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import argparse
 import json
+from itertools import islice
 from pathlib import Path
-from typing import Dict, Iterable, Iterator, List, Sequence, Tuple
+from typing import Dict, Iterable, Iterator, List, Sequence, Tuple, TypeVar
 
 from taxonomy.config.settings import Settings
 from taxonomy.entities.core import Candidate, Concept
@@ -31,6 +32,7 @@ def extract_candidates(
     batch_size: int = 32,
     settings: Settings | None = None,
     observability: ObservabilityContext | None = None,
+    audit_mode: bool = False,
 ) -> List[Candidate]:
     """High-level API for running the S1 pipeline.
 
@@ -48,6 +50,7 @@ def extract_candidates(
     """
 
     cfg = settings or Settings()
+    audit_mode_enabled = bool(audit_mode or cfg.audit_mode.enabled)
     label_policy = cfg.policies.label_policy
     extractor = ExtractionProcessor(observability=observability)
     normalizer = CandidateNormalizer(label_policy=label_policy)
@@ -103,16 +106,20 @@ def extract_candidates(
     if previous_parents:
         parent_index.build_index(previous_parents)
 
+    def _source_iter() -> Iterator:
+        records = load_source_records(source_records_path)
+        return _limit_source_records(records) if audit_mode_enabled else records
+
     total_records: int | None = None
     if cfg.observability.precount_s1_records:
-        total_records = sum(1 for _ in load_source_records(source_records_path))
+        total_records = sum(1 for _ in _source_iter())
 
     resume_path = Path(resume_from) if resume_from is not None else None
     processed_records, aggregated_state = _load_resume_checkpoint(resume_path)
     if total_records is not None and processed_records > total_records:
         processed_records = total_records
 
-    remaining_records = _skip_records(load_source_records(source_records_path), processed_records)
+    remaining_records = _skip_records(_source_iter(), processed_records)
 
     with logging_context(stage="s1", level=level, records=total_records):
         for batch in chunked(remaining_records, batch_size):
@@ -191,6 +198,7 @@ def extract_candidates(
             "policy_version": cfg.policies.policy_version,
             "level": level,
             "batch_size": batch_size,
+            "audit_mode": audit_mode_enabled,
         }
 
         metadata_destination: Path | None
@@ -212,11 +220,20 @@ def extract_candidates(
     return candidates
 
 
+T = TypeVar("T")
+
+
 def _skip_records(records: Iterable, offset: int) -> Iterator:
     for index, record in enumerate(records):
         if index < offset:
             continue
         yield record
+
+
+def _limit_source_records(records: Iterable[T], *, limit: int = 10) -> Iterator[T]:
+    """Yield at most *limit* source records from *records*."""
+
+    return islice(records, limit)
 
 
 def _merge_aggregated_state(
@@ -331,6 +348,11 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         default=32,
         help="Number of records to process per extraction batch",
     )
+    parser.add_argument(
+        "--audit-mode",
+        action="store_true",
+        help="Limit S1 extraction to 10 source records for audit verification",
+    )
     return parser.parse_args(argv)
 
 
@@ -355,6 +377,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             metadata_path=args.metadata,
             resume_from=args.resume_from,
             batch_size=args.batch_size,
+            audit_mode=args.audit_mode,
         )
     except Exception as exc:  # pragma: no cover - defensive CLI guard
         logger.exception("S1 extraction failed", error=str(exc))

@@ -79,6 +79,7 @@ class TaxonomyOrchestrator:
             post_processors=post_processors,
             finalizer=finalizer,
             resume_handler=resume_handler,
+            audit_mode=settings.audit_mode.enabled,
         )
 
         return cls(

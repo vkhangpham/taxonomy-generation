@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+from itertools import islice
 from pathlib import Path
 from typing import Iterable, Iterator, Sequence
 
@@ -27,10 +28,12 @@ def extract_from_snapshots(
     *,
     batch_size: int = 1000,
     compress: bool | None = None,
+    audit_mode: bool = False,
 ) -> dict:
     """Run the raw extraction pipeline end-to-end and persist SourceRecords."""
 
     settings = settings or get_settings()
+    audit_mode_enabled = bool(audit_mode or settings.audit_mode.enabled)
     logger = get_logger(module=__name__)
 
     if settings.create_dirs:
@@ -46,6 +49,8 @@ def extract_from_snapshots(
     writer = RecordWriter()
 
     snapshot_iter = _resolve_snapshot_iter(snapshot_source, loader)
+    if audit_mode_enabled:
+        snapshot_iter = _limit_snapshots(snapshot_iter)
 
     iterable: Iterable[SnapshotRecord] = snapshot_iter
     if tqdm is not None:
@@ -83,6 +88,7 @@ def extract_from_snapshots(
         "processor": processor.metrics.as_dict(),
         "loader": loader.metrics.as_dict(),
         "settings_version": settings.policy_version,
+        "audit_mode": audit_mode_enabled,
     }
     writer.write_metadata(metadata, stats_target)
 
@@ -97,6 +103,7 @@ def extract_from_snapshots(
         meta=str(stats_target),
         pages=processor.metrics.pages_seen,
         emitted=processor.metrics.pages_emitted,
+        audit_mode=audit_mode_enabled,
     )
     return result
 
@@ -123,6 +130,12 @@ def _resolve_snapshot_iter(
     return loader.validate_snapshots(iterator())
 
 
+def _limit_snapshots(iterator: Iterator[SnapshotRecord], *, limit: int = 10) -> Iterator[SnapshotRecord]:
+    """Yield at most *limit* snapshot records from *iterator*."""
+
+    return islice(iterator, limit)
+
+
 def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Run S0 raw extraction over snapshots")
     parser.add_argument(
@@ -146,6 +159,11 @@ def build_arg_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Compress JSONL output using gzip",
     )
+    parser.add_argument(
+        "--audit-mode",
+        action="store_true",
+        help="Limit extraction to 10 snapshots for audit verification runs",
+    )
     return parser
 
 
@@ -157,6 +175,7 @@ def main(argv: Sequence[str] | None = None) -> dict:
         args.output,
         batch_size=args.batch_size,
         compress=args.compress,
+        audit_mode=args.audit_mode,
     )
 
 

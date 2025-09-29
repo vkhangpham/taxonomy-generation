@@ -147,6 +147,15 @@ class PipelineObservabilityConfig(BaseModel):
         return target
 
 
+class AuditModeConfig(BaseModel):
+    """Configuration toggle for limiting stage inputs during audits."""
+
+    enabled: bool = Field(
+        default=False,
+        description="Limit each pipeline stage to a small sample (10 items) for audit runs.",
+    )
+
+
 class Settings(BaseSettings):
     """Primary configuration object for the taxonomy application.
 
@@ -170,6 +179,7 @@ class Settings(BaseSettings):
     config_dir: Path = Field(default=DEFAULT_CONFIG_DIR)
     paths: PathsConfig = Field(default_factory=PathsConfig)
     observability: PipelineObservabilityConfig = Field(default_factory=PipelineObservabilityConfig)
+    audit_mode: AuditModeConfig = Field(default_factory=AuditModeConfig)
     create_dirs: bool = Field(
         default=False,
         description="Create filesystem directories declared in `paths` during initialisation.",
@@ -286,4 +296,4 @@ def get_settings() -> Settings:
     return Settings()
 
 
-__all__ = ["Settings", "get_settings", "PathsConfig"]
+__all__ = ["Settings", "get_settings", "PathsConfig", "AuditModeConfig"]
