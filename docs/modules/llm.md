@@ -121,3 +121,125 @@ Open Questions
 - Preferred provider JSON/grammar mode for maximum determinism?
 - Should we support provider failover or keep a single provider for reproducibility?
 - Hard cap on retries per batch to bound latency?
+
+## Architecture Overview
+
+Components
+- LLMClient (`src/taxonomy/llm/client.py`)
+  - Single entry point: deterministic execution, options normalization, token accounting, and error mapping.
+  - Public API: `run(prompt_key, variables, options=None)`, `load_prompt(prompt_key)`, `set_profile(profile)`, `active_version(prompt_key)`.
+- PromptRegistry (`src/taxonomy/llm/registry.py`)
+  - Loads `prompts/registry.yaml`, resolves active version and template path, supports optional hot‑reload.
+  - Exposes metadata for manifests: `{key, version, template_path, schema_path}`.
+- ProviderManager (`src/taxonomy/llm/providers.py`)
+  - Thin DSPy‑backed adapter that configures provider/model, timeouts, and retry/backoff per policy.
+  - Supports provider failover when enabled by policy; otherwise pinned for reproducibility.
+- JSONValidator (`src/taxonomy/llm/validation.py`)
+  - Enforces schema (JSON mode or post‑parse), applies repair heuristics, and returns typed errors.
+- MetricsCollector (`src/taxonomy/llm/observability.py`)
+  - Emits counters, latency, and token usage to `ObservabilityContext` with per‑prompt attribution.
+
+Deterministic Defaults
+- `temperature=0.0`, `top_p=1.0`, fixed `seed` (when supported), sorted list outputs.
+- Output must be JSON‑only; extra text is rejected before validation.
+
+## Config & Policy Integration
+
+Sources
+- Settings (`src/taxonomy/config/settings.py`) selects the active LLM profile and paths.
+- LLM policy (`src/taxonomy/config/policies/llm.py`) declares: provider/model, max tokens, retries, backoff, JSON/tool modes, and failover strategy.
+
+Behavior
+- `LLMClient.set_profile(profile)` pins a `(provider, model)` tuple and option caps from policy.
+- Prompt versions from the registry and the active profile are stamped into the run manifest via observability.
+
+## Prompt Resolution & Versioning
+
+Flow
+1. `LLMClient.run(key, vars)` → `PromptRegistry.resolve(key)`.
+2. Registry returns `{template, schema, version}`; template rendered with variables.
+3. ProviderManager executes with deterministic options; response validated against schema.
+4. MetricsCollector records `{model, prompt_version, tokens_in/out, latency_ms}`.
+
+Hot‑Reload (optional)
+- When enabled, registry re‑reads `prompts/registry.yaml` on change; otherwise, it is loaded once at startup for reproducibility.
+
+Example: Registry Entry (abbrev.)
+```yaml
+schema_version: 1
+prompts:
+  taxonomy.extract:
+    active: v3
+    versions:
+      v3:
+        template: prompts/templates/extraction.jinja2
+        schema: prompts/schemas/extraction.json
+```
+
+## Provider Configuration Examples
+
+Select Profile (Python)
+```python
+from taxonomy.llm.client import LLMClient
+
+llm = LLMClient.from_settings(settings)
+llm.set_profile("default")  # pins provider/model from policy
+result = llm.run("taxonomy.extract", {"institution": "u2", "level": 2, "text": doc})
+```
+
+Policy Snippet (conceptual)
+```python
+LLMPolicy(
+  profile="default",
+  provider="openai",
+  model="gpt-4o-mini",
+  retries=2,
+  backoff_ms=(200, 800),
+  json_mode=True,
+  temperature=0.0,
+)
+```
+
+## Error Handling & Repair Path
+
+Categories
+- Transport errors (429/5xx): bounded retries with exponential backoff; final failure quarantined.
+- Invalid JSON: try parse‑strip → constrained re‑ask → quarantine with evidence payload.
+- Schema mismatch: emit `invalid_schema` with field errors; no free‑form fallbacks.
+
+Evidence Payload (quarantine)
+```json
+{
+  "prompt_key": "taxonomy.extract",
+  "version": "v3",
+  "provider": "openai:gpt-4o-mini",
+  "error": "invalid_json",
+  "attempts": 2,
+  "sample": "Candidates: computer vision, robotics"
+}
+```
+
+## Observability Integration
+
+Counters
+- `llm.calls_total`, `llm.ok`, `llm.invalid_json`, `llm.retries`, `llm.quarantined`.
+
+Performance
+- Per‑call latency and tokens_in/out; aggregated in manifest by prompt key and model.
+
+Manifest Fields
+- `prompts[{key}] = version`, `models[{key}] = model_id`, `llm.tokens = {in, out}`.
+
+## Contract Examples
+
+Extraction
+```python
+result = llm.run("taxonomy.extract", {"institution": "u2", "level": 2, "text": text})
+assert result.ok and isinstance(result.content, list)
+```
+
+Verification
+```python
+res = llm.run("taxonomy.verify_single_token", {"label": label, "level": 2})
+assert res.content == {"pass": True, "reason": ""}
+```

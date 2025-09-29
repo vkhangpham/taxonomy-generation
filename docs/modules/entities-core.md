@@ -48,3 +48,32 @@ Examples
   ```json
   {"id":"cv","label":"computer vision","level":2,"parents":["ml"]}
   ```
+
+## Module Reference
+
+Core Models (`src/taxonomy/entities/core.py`)
+- `PageSnapshot` — immutable capture of fetched page content with URL, fetch time (UTC), language, and normalized text blocks.
+- `SourceRecord` — raw text with provenance (`Provenance`, `SourceMeta`) linking back to `PageSnapshot` or other sources.
+- `Candidate` — intermediate proposal with normalized label, aliases, level, and `SupportStats` derived from evidence.
+- `Concept` — validated taxonomy node with stable `id`, normalized label, level, parents, and provenance summary.
+- `MergeOp` / `SplitOp` — transformation operations to track consolidation and disambiguation with rationales.
+
+Supporting Classes
+- `Provenance` — source identifiers, timestamps, and stable content hash.
+- `SourceMeta` — origin metadata (institution, crawler, content type).
+- `SupportStats` — counts and aggregates (institutions, sources, occurrences) used in S2.
+- `Rationale` — compact human‑readable justification; never chain‑of‑thought.
+- `ValidationFinding` — structured rule/LLM/web gate result used in S3.
+
+Lifecycle Across S0–S3
+- S0 (Web Mining): `PageSnapshot` → `SourceRecord` with provenance.
+- S1 (Extraction): `SourceRecord[]` → `Candidate[]` with initial `SupportStats` and normalization applied.
+- S2 (Frequency): update `SupportStats`; drop candidates below thresholds; emit `SplitOp` for disambiguation candidates.
+- S3 (Verification): validate candidates; promote passing ones to `Concept` and attach `ValidationFinding` summary.
+
+Validation & Normalization
+- Canonical label rules applied at creation; alias lists derived via utils; parent constraints enforced in hierarchy assembly.
+- URLs normalized (scheme/host lowercased, fragments removed); timestamps stored as UTC ISO‑8601.
+
+Observability
+- Entity counts/distributions exported via `ObservabilityManifest`; representative evidence attached to candidates and concepts per policy sampling.

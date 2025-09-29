@@ -61,3 +61,42 @@ Examples
     runs_dir: output/runs
   ```
   Produces a `Settings` instance whose manifest includes `{ "environment": "development" }` and a policy version block.
+
+## Settings Structure
+
+Top‑Level
+- `Settings` (`src/taxonomy/config/settings.py`) — typed container for all config, layered from defaults → YAML overlays → env.
+- `PathsConfig` — normalized filesystem layout (runs, logs, prompts, cache); all paths are absolute at runtime.
+- `PipelineObservabilityConfig` — sampling rates, verbosity, manifest toggles, and performance counters enablement.
+
+Layering
+- YAML overlays in `config/` are merged by environment; env vars override using `TAXONOMY_*` and nested policy overrides via `TAXONOMY_POLICY__<policy>__<field>`.
+- Example: `export TAXONOMY_POLICY__llm__retries=1` forces a single retry in development.
+
+Policy Modules (detailed)
+- `validation.py` — label canonicalization, single‑token constraints, regex vocabularies, web/LLM validator toggles.
+- `identity.py` — campus/system affiliation, joint centers, cross‑listing normalization.
+- `extraction.py` — S0/S1 heuristics: language detection, page/record bounds, dedup caps.
+- `hierarchy.py` — parent/child level guards, DAG constraints, orphan handling.
+- `llm.py` — provider/model profiles, retries/backoff, json/tool modes, token limits.
+- `web.py` — authoritative domains, timeouts, snippet size, user‑agent and robots rules.
+- `thresholds.py` — shared numeric thresholds per level; consumed by S2 and validators.
+- `observability.py` — counter namespaces, evidence sampling rates, log verbosity.
+- `prompt_optimization.py` — search space, validation ratios, strictness gates.
+
+Policy Versions & Manifests
+- Every policy carries a semantic version; `Settings` exports the active versions into the run manifest (and observability payload).
+- When resuming from a checkpoint, the pipeline can pin to manifest‑recorded versions to guarantee reproducibility.
+
+Examples
+- Env override for a nested threshold map:
+  ```bash
+  export TAXONOMY_POLICY__thresholds__L3_min_src=3
+  ```
+- YAML overlay enabling stricter JSON validation for LLM:
+  ```yaml
+  policy:
+    llm:
+      json_mode: true
+      retries: 2
+  ```

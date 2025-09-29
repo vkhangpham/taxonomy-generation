@@ -145,3 +145,44 @@ Examples
 
 - Example B: Determinism check
   - Re-run with same seed and inputs → identical `run_id` hash, counters, and artifacts checksums.
+
+## Module Reference
+
+Core Classes
+- ObservabilityContext (`src/taxonomy/observability/context.py`)
+  - Process‑wide facade for counters, evidence, quarantine, operations, and performance.
+  - Provides `phase(name)` context manager that ensures balanced start/complete/failed events.
+- CounterRegistry (`src/taxonomy/observability/registry.py`)
+  - Standardizes counter names and storage; exposes increment/add/set operations.
+- EvidenceSampler (`src/taxonomy/observability/evidence.py`)
+  - Captures representative outcomes; configurable sampling rates and categories.
+- QuarantineManager (`src/taxonomy/observability/quarantine.py`)
+  - Records failures with reason and JSON‑safe payloads for replay.
+- ObservabilityManifest (`src/taxonomy/observability/manifest.py`)
+  - Builds export payload with counters, performance, operations, prompts, thresholds, seeds, and checksums.
+- Determinism Utilities (`src/taxonomy/observability/determinism.py`)
+  - `stable_hash`, `canonical_json`, `freeze` for checksum and comparison ignoring incidental ordering.
+
+Phase Context Management
+- Always wrap work in `with observability.phase("S<idx>") as phase:`.
+- Use `phase.increment`, `phase.evidence`, `phase.quarantine`, `phase.performance`, and `phase.log_operation`.
+- On exceptions, `phase.failed` is logged automatically before the exception bubbles.
+
+Performance Tracking
+- Record per‑batch elapsed seconds and sizes; registry aggregates histograms for manifest.
+
+Thresholds & Seeds
+- Register once per run: `observability.register_threshold("S2.level_2", {...})`, `observability.register_seed("global", 42)`.
+- Values are copied into manifest for audit and replay.
+
+Config Integration
+- Observability policy controls sampling rates, verbosity, and counter namespaces.
+- Settings expose paths for logs, manifests, and run outputs consumed by the manifest exporter.
+
+Quarantine Scenarios (examples)
+- `processing_error`: unexpected exception inside a phase.
+- `invalid_payload`: schema mismatch or unparseable external input.
+- `provider_error`: LLM/Web errors exceeding retry budget.
+
+Snapshot Generation
+- `observability.snapshot()` returns an immutable view used by metadata builders and tests.
