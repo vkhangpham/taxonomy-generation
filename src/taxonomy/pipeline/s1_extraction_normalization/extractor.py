@@ -70,13 +70,7 @@ class ExtractionMetrics:
             and entry.get("phase") == "S1"
             and entry.get("operation") == "provider_error"
         )
-        invalid_json = sum(
-            1
-            for entry in snapshot.operations
-            if isinstance(entry, Mapping)
-            and entry.get("phase") == "S1"
-            and entry.get("operation") == "invalid_json"
-        )
+        invalid_json = int(counters.get("invalid_json", 0))
         return cls(
             records_in=int(counters.get("records_in", 0)),
             candidates_out=int(counters.get("candidates_out", 0)),
@@ -200,8 +194,6 @@ class ExtractionProcessor:
                         break
                     except ValidationError as exc:
                         self._increment_legacy("invalid_json")
-                        if phase_handle is not None:
-                            phase_handle.increment("invalid_json")
                         final_error = str(exc)
                         error_reason = "invalid_json"
                         self._log.warning(

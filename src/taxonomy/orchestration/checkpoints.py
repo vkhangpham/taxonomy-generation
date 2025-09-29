@@ -97,7 +97,6 @@ class CheckpointManager:
             try:
                 stat_result = candidate.stat()
             except OSError as error:
-                failures.append((candidate, str(error)))
                 _LOGGER.warning(
                     "Unable to stat checkpoint during cleanup",
                     path=str(candidate),

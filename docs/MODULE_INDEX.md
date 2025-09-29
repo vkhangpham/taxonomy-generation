@@ -62,22 +62,31 @@ Orchestration & Abstractions
 - `src/taxonomy/pipeline/README.md` — ✅ Complete
 
 Cross‑Cutting Services
-- `src/taxonomy/llm/README.md` — ❌ Missing
-- `src/taxonomy/observability/README.md` — ❌ Missing
-- `src/taxonomy/web_mining/README.md` — ❌ Missing
-- `src/taxonomy/prompt_optimization/README.md` — ❌ Missing
+- `src/taxonomy/llm/README.md` — ✅ Complete
+- `src/taxonomy/observability/README.md` — ✅ Complete
+- `src/taxonomy/web_mining/README.md` — ✅ Complete
+- `src/taxonomy/prompt_optimization/README.md` — ✅ Complete
 
 Configuration & Policies
-- `src/taxonomy/config/README.md` — ❌ Missing
+- `src/taxonomy/config/README.md` — ✅ Complete
 
 Domain Entities
-- `src/taxonomy/entities/README.md` — ❌ Missing
+- `src/taxonomy/entities/README.md` — ✅ Complete
 
 Shared Utilities
-- `src/taxonomy/utils/README.md` — ❌ Missing
+- `src/taxonomy/utils/README.md` — ✅ Complete
 
 CLI
-- `src/taxonomy/cli/README.md` — ❌ Missing
+- `src/taxonomy/cli/README.md` — ✅ Complete
 
 See Also
 - Full mapping with detailed doc links: `docs/MODULE_README_INVENTORY.md`.
+
+## README Rollout Summary
+
+Status
+- All cross‑cutting services and operational modules now include quick‑reference `README.md` files alongside the detailed module docs in `docs/modules/`.
+- Newly completed READMEs: `src/taxonomy/llm/README.md`, `src/taxonomy/observability/README.md`, `src/taxonomy/config/README.md`, `src/taxonomy/entities/README.md`, `src/taxonomy/utils/README.md`, `src/taxonomy/cli/README.md`, `src/taxonomy/prompt_optimization/README.md`, `src/taxonomy/web_mining/README.md`, `prompts/README.md`, and `tests/README.md`.
+
+Cross‑References
+- READMEs link to their authoritative specs under `docs/modules/` and reflect current policy defaults captured in `docs/policies.md`.
