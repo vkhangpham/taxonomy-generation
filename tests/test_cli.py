@@ -54,6 +54,36 @@ def test_partition_global_arguments_handles_repeatable_overrides() -> None:
     assert command_args == []
 
 
+def test_partition_stops_at_first_subcommand_token() -> None:
+    global_args, command_args = _partition_global_arguments(
+        ["--environment", "development", "pipeline", "--verbose", "--resume-phase", "S1"]
+    )
+
+    assert global_args == ["--environment", "development"]
+    assert command_args == ["pipeline", "--verbose", "--resume-phase", "S1"]
+
+
+def test_partition_supports_combined_short_flags_and_values() -> None:
+    # -v (flag) combined with -o (expects value) and value provided as next token
+    global_args, command_args = _partition_global_arguments(["-vo", "policy.alpha=1", "pipeline"]) 
+    assert global_args == ["-v", "-o", "policy.alpha=1"]
+    assert command_args == ["pipeline"]
+
+
+def test_partition_supports_short_equals_and_glued_values() -> None:
+    # -o=value and -ovalue forms are both accepted
+    g1, c1 = _partition_global_arguments(["-o=policy.beta=2", "dev"]) 
+    g2, c2 = _partition_global_arguments(["-opoly.gamma=3", "dev"]) 
+    assert g1 == ["-o", "policy.beta=2"] and c1 == ["dev"]
+    assert g2 == ["-o", "poly.gamma=3"] and c2 == ["dev"]
+
+
+def test_partition_supports_long_equals_and_terminator() -> None:
+    g, c = _partition_global_arguments(["--run-id=abc", "--", "--override", "x=1"]) 
+    assert g == ["--run-id=abc"]
+    assert c == ["--", "--override", "x=1"]
+
+
 def test_pipeline_generate_invokes_stage(monkeypatch: pytest.MonkeyPatch, runner: CliRunner, cli_env: dict[str, str], tmp_path: Path) -> None:
     called: dict[str, Path] = {}
 

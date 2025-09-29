@@ -161,34 +161,117 @@ _GLOBAL_FLAG_OPTIONS = {"--verbose", "-v", "--no-observability"}
 
 
 def _partition_global_arguments(arguments: Iterable[str]) -> tuple[list[str], list[str]]:
-    """Split global CLI options from command-specific arguments."""
+    """Split global CLI options from command-specific arguments.
+
+    Only tokens that appear before the first non-global token (i.e. the first
+    subcommand or positional argument) are considered for global parsing. Once a
+    non-global token is encountered, the remainder is returned as ``command_args``
+    without any further inspection. This avoids accidentally treating subcommand
+    options as global ones.
+    """
 
     tokens = list(arguments)
     global_args: list[str] = []
     command_args: list[str] = []
-    index = 0
 
-    while index < len(tokens):
-        token = tokens[index]
+    i = 0
+    while i < len(tokens):
+        token = tokens[i]
+
+        # Respect conventional terminator: everything after "--" is for commands
         if token == "--":
-            command_args.extend(tokens[index:])
+            command_args.extend(tokens[i:])
             break
 
-        option, has_equals, _ = token.partition("=")
-        if option in _GLOBAL_OPTIONS_WITH_VALUES:
-            global_args.append(token)
-            if not has_equals:
-                index += 1
-                if index < len(tokens):
-                    global_args.append(tokens[index])
+        # Long options (e.g., --flag or --key=value)
+        if token.startswith("--"):
+            # Use partition to split option and value; empty separator means no value provided.
+            option, sep, value = token.partition("=")  # sep is "=" when value is inline
+            if option in _GLOBAL_OPTIONS_WITH_VALUES:
+                if sep:  # --opt=value form
+                    global_args.append(token)
+                    i += 1
+                    continue
+                # value provided as next token
+                global_args.append(option)
+                i += 1
+                if i < len(tokens):
+                    global_args.append(tokens[i])
+                    i += 1
                 else:  # pragma: no cover - delegated to Typer for validation
                     break
-        elif option in _GLOBAL_FLAG_OPTIONS:
-            global_args.append(token)
-        else:
-            command_args.append(token)
+                continue
+            if option in _GLOBAL_FLAG_OPTIONS:
+                global_args.append(option)
+                i += 1
+                continue
 
-        index += 1
+            # First non-global token: stop parsing globals
+            command_args.extend(tokens[i:])
+            break
+
+        # Short options and clusters (e.g., -v, -oVAL, -o=VAL, -vo)
+        if token.startswith("-") and token != "-":
+            base, eq_sep, inline_value = token.partition("=")
+            cluster = base[1:]
+
+            # Process a short option cluster from left to right.
+            j = 0
+            consumed_entire_token = True
+            while j < len(cluster):
+                short = f"-{cluster[j]}"
+
+                if short in _GLOBAL_FLAG_OPTIONS:
+                    global_args.append(short)
+                    j += 1
+                    continue
+
+                if short in _GLOBAL_OPTIONS_WITH_VALUES:
+                    global_args.append(short)
+
+                    # Prefer explicit "=value" when present. For clusters like
+                    # "-opoly=3", preserve the full suffix ("poly=3") as the value.
+                    if eq_sep:
+                        if base != short:  # there were extra chars before '=' in the cluster
+                            suffix = base[2:] + "=" + inline_value
+                            global_args.append(suffix)
+                        else:
+                            global_args.append(inline_value)
+                        j = len(cluster)  # done with this token
+                        break
+
+                    # If there are remaining chars in the cluster, treat them as the value (e.g., -odev)
+                    if j + 1 < len(cluster):
+                        global_args.append(cluster[j + 1 :])
+                        j = len(cluster)
+                        break
+
+                    # Otherwise, consume the next token as the value
+                    i += 1
+                    if i < len(tokens):
+                        global_args.append(tokens[i])
+                        j = len(cluster)
+                        break
+                    else:  # pragma: no cover - delegated to Typer for validation
+                        consumed_entire_token = True
+                        j = len(cluster)
+                        break
+
+                # Encountered a non-global short option: stop parsing globals
+                consumed_entire_token = False
+                break
+
+            if consumed_entire_token and j == len(cluster):
+                i += 1
+                continue
+
+            # First non-global token within the cluster -> stop and pass the rest through
+            command_args.extend(tokens[i:])
+            break
+
+        # Any other token indicates the start of the subcommand/positional args
+        command_args.extend(tokens[i:])
+        break
 
     return global_args, command_args
 

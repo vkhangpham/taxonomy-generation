@@ -1,6 +1,6 @@
 {
-  "captured_at": "2025-09-28T18:52:41.603991Z",
-  "checksum": "41c71565fdfc953c94a4af231d485f190cb82660e234e4af87502fc788925950",
+  "captured_at": "2025-09-29T08:54:54.626919Z",
+  "checksum": "cf304bcbf7a3e791fea680df147c4a7f8f8126c37f687645f2b73ee40b273610",
   "counters": {
     "Dedup": {
       "components": 0,
@@ -83,7 +83,7 @@
       "outcome": "success",
       "payload": {
         "candidates": 1,
-        "elapsed_seconds": 1.1084135621786118e-05,
+        "elapsed_seconds": 1.74578744918108e-05,
         "level": 0,
         "records": 1
       },
@@ -102,7 +102,7 @@
       "outcome": "success",
       "payload": {
         "candidates": 1,
-        "elapsed_seconds": 8.167000487446785e-06,
+        "elapsed_seconds": 6.541842594742775e-06,
         "level": 1,
         "records": 1
       },
@@ -121,7 +121,7 @@
       "outcome": "success",
       "payload": {
         "candidates": 1,
-        "elapsed_seconds": 6.500165909528732e-06,
+        "elapsed_seconds": 6.875023245811462e-06,
         "level": 2,
         "records": 1
       },
@@ -140,7 +140,7 @@
       "outcome": "success",
       "payload": {
         "candidates": 1,
-        "elapsed_seconds": 7.4999406933784485e-06,
+        "elapsed_seconds": 1.1667143553495407e-05,
         "level": 3,
         "records": 1
       },
@@ -158,7 +158,7 @@
       "operation": "complete",
       "outcome": "success",
       "payload": {
-        "elapsed_seconds": 3.5830307751893997e-06,
+        "elapsed_seconds": 3.834022209048271e-06,
         "level": "consolidation",
         "records": 0
       },
@@ -177,7 +177,7 @@
       "outcome": "success",
       "payload": {
         "converged": true,
-        "elapsed_seconds": 5.292007699608803e-06,
+        "elapsed_seconds": 5.833106115460396e-06,
         "iterations": 1
       },
       "phase": "S3",
@@ -194,7 +194,7 @@
       "operation": "complete",
       "outcome": "success",
       "payload": {
-        "elapsed_seconds": 4.292000085115433e-06,
+        "elapsed_seconds": 4.667090252041817e-06,
         "validation_nodes": 1
       },
       "phase": "Hierarchy",
@@ -203,23 +203,23 @@
   ],
   "performance": {
     "Hierarchy": {
-      "elapsed_seconds": 4.292000085115433e-06,
+      "elapsed_seconds": 4.667090252041817e-06,
       "validation_nodes": 1
     },
     "S1": {
       "candidates": 1,
-      "elapsed_seconds": 7.4999406933784485e-06,
+      "elapsed_seconds": 1.1667143553495407e-05,
       "level": 3,
       "records": 1
     },
     "S2": {
-      "elapsed_seconds": 3.5830307751893997e-06,
+      "elapsed_seconds": 3.834022209048271e-06,
       "level": "consolidation",
       "records": 0
     },
     "S3": {
       "converged": true,
-      "elapsed_seconds": 5.292007699608803e-06,
+      "elapsed_seconds": 5.833106115460396e-06,
       "iterations": 1
     }
   },
@@ -234,27 +234,29 @@
     "llm.random_seed": 12345,
     "settings.random_seed": 20250927
   },
-  "snapshot_timestamp": 1759085561.603991,
+  "snapshot_timestamp": 1759136094.626919,
   "thresholds": {
-    "level_thresholds.level_0": {
-      "min_institutions": 1,
-      "min_src_count": 1,
-      "weight_formula": "1.0*inst_count + 0.3*log(1+src_count)"
-    },
-    "level_thresholds.level_1": {
-      "min_institutions": 1,
-      "min_src_count": 1,
-      "weight_formula": "1.0*inst_count + 0.3*log(1+src_count)"
-    },
-    "level_thresholds.level_2": {
-      "min_institutions": 2,
-      "min_src_count": 1,
-      "weight_formula": "1.0*inst_count + 0.3*log(1+src_count)"
-    },
-    "level_thresholds.level_3": {
-      "min_institutions": 2,
-      "min_src_count": 3,
-      "weight_formula": "1.0*inst_count + 0.3*log(1+src_count)"
+    "level_thresholds": {
+      "level_0": {
+        "min_institutions": 1,
+        "min_src_count": 1,
+        "weight_formula": "1.0*inst_count + 0.3*log(1+src_count)"
+      },
+      "level_1": {
+        "min_institutions": 1,
+        "min_src_count": 1,
+        "weight_formula": "1.0*inst_count + 0.3*log(1+src_count)"
+      },
+      "level_2": {
+        "min_institutions": 2,
+        "min_src_count": 1,
+        "weight_formula": "1.0*inst_count + 0.3*log(1+src_count)"
+      },
+      "level_3": {
+        "min_institutions": 2,
+        "min_src_count": 3,
+        "weight_formula": "1.0*inst_count + 0.3*log(1+src_count)"
+      }
     }
   }
 }
