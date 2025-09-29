@@ -1,7 +1,7 @@
 # Functional Blueprint: Taxonomy Generation & Prompt Optimization
 
 Note
-- This blueprint defines the system’s functional requirements and logic specification. It complements the per‑module specs in `docs/modules/` and the developer‑focused READMEs colocated with code. Use this when you need a deep understanding of behaviors, invariants, and end‑to‑end flow.
+- This blueprint defines the system’s functional requirements and logic specification. It complements the module READMEs under `src/taxonomy/**/README.md` and provides end-to-end context when you need deeper reasoning about behaviors, invariants, and flows.
 
 This document defines what the system must do — the behaviors, rules, and guarantees — without prescribing any file layout, frameworks, or implementation details. It preserves logic so you can rebuild from scratch with freedom of structure.
 

@@ -21,7 +21,7 @@ Versioning
 - Use semantic or date-based versions; keep `notes` for lineage. Changing defaults requires a policy bump and docs update.
 
 See Also
-- LLM details: `docs/modules/llm.md`.
+- LLM details: `src/taxonomy/llm/README.md`.
 - Optimization: `src/taxonomy/prompt_optimization`.
 
 Maintenance

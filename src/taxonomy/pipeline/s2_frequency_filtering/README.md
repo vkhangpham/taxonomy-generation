@@ -1,5 +1,7 @@
 # S2 · Frequency Filtering
 
+## Quick Reference
+
 Purpose
 - Filter candidate tokens by frequency patterns and institution support to reduce noise.
 
@@ -19,5 +21,128 @@ CLI
 - Run filtering: `python main.py pipeline generate --step S2 --level <N>`
 
 Related Docs
-- Detailed pipeline: `docs/modules/s2-frequency-filtering-pipeline.md`
+- Detailed pipeline: this README
+
+## Detailed Specification
+
+### Cross‑Institution Frequency Filtering (S2) — Logic Spec
+
+Purpose
+- Retain candidates with sufficient support across distinct institutions/sources; drop idiosyncratic or localized terms.
+
+Core Tech
+- Deterministic aggregator over normalized keys (level, normalized, parent_lineage).
+- Stable institution identity resolver (policy-configured campus/system mapping).
+
+Inputs/Outputs (semantic)
+- Input: Candidate[] with provenance
+- Output: Candidate[] (kept) with support metrics and rationale; dropped list with reasons
+
+Metrics
+- inst_count: number of distinct institutions supporting the (level, normalized, parent_lineage) key (placeholder::unknown when missing)
+- record_count: number of distinct SourceRecords after near-duplicate collapsing per institution
+- raw_count: total source observations (for auditing only)
+- weight: w1*inst_count + w2*log(1+record_count) (defaults w1=1.0, w2=0.3)
+
+Thresholds (defaults; tune with eval set)
+- L0 ≥ 1 inst
+- L1 ≥ 1 inst
+- L2 ≥ 2 inst
+- L3 ≥ 2 inst and record_count ≥ 3
+
+Rules & Invariants
+- Distinct institution definition must be stable (campus vs. system); document policy.
+- Substitute a stable placeholder (`placeholder::unknown`) when evidence lacks institution metadata.
+- De-duplicate near-identical pages within the same institution before counting; policy-driven delimiters and suffix stripping control collapse.
+- Keep rationale: store counts, institution list (sampled if large), and representative snippets.
+
+- Aggregate by key; compute metrics; compare with per-level thresholds.
+- Collapse near-duplicate record fingerprints per institution when enabled by policy.
+- Produce explainable rationale entries: kept/dropped with threshold references (institutions, records, raw observations).
+
+Failure Handling
+- On missing provenance, treat as single‑institution fallback; flag low confidence.
+
+Observability
+- Counters: candidates_in, aggregated_groups, kept, dropped, dropped_insufficient_support, institutions_unique.
+- Distributions: inst_count histogram by level (stored under `institutions_histogram`).
+
+Acceptance Tests
+- Candidates with identical normalized forms across ≥2 institutions pass at L2/L3.
+- Near-duplicate sources at a single institution do not inflate counts.
+
+Open Questions
+- Should research consortia/shared centers count as independent institutions?
+
+Examples
+- Example A: L2 concept passes
+  - Aggregated supports:
+    ```json
+    {
+      "key": [2, "computer vision", "college of engineering>computer science"],
+      "inst_count": 3,
+      "src_count": 7,
+      "institutions": ["u1","u4","u7"]
+    }
+    ```
+  - Decision: keep (inst_count ≥ 2 satisfied for L2).
+
+- Example B: L3 concept fails due to insufficient breadth
+  - Aggregated supports:
+    ```json
+    {
+      "key": [3, "graph transformers", "...>machine learning"],
+      "inst_count": 1,
+      "src_count": 5
+    }
+    ```
+  - Decision: drop (requires ≥ 2 institutions at L3).
+
+- Example C: Near‑duplicate sources de‑inflated
+  - Two pages from the same institution with 0.98 similarity count as one source; src_count reflects de‑duped pages.
+
+### S2 Frequency Filtering Pipeline
+
+This document specifies the frequency-based consolidation that filters `Candidate` inputs using occurrence and support thresholds.
+
+#### Scope
+
+- `src/taxonomy/pipeline/s2_frequency_filtering/processor.py`
+- `src/taxonomy/pipeline/s2_frequency_filtering/main.py`
+- `src/taxonomy/pipeline/s2_frequency_filtering/aggregator.py`
+
+#### Components
+
+- Frequency aggregator: groups candidates, computes counts, and institution support metrics.
+- Filtering processor: applies thresholds per level and emits filtered candidates and stats.
+
+#### Data Flow
+
+`Candidate` → aggregate frequency/support → apply thresholds → filtered `Candidate`
+
+#### Thresholds & Policies
+
+- Level-specific minimum count.
+- Optional institution-based weighting to prefer broadly supported tokens.
+
+#### Checkpointing
+
+- Phase-level checkpoint after filtering completes; includes summary stats and drop reasons.
+
+#### CLI
+
+- `pipeline generate --step S2 --level <0..3>`
+- Entry: `filter_by_frequency()` in `main.py`.
+
+#### Example
+
+```json
+{
+  "token": "python",
+  "level": 1,
+  "count": 3,
+  "institutions": ["A", "B"]
+}
+```
+→ kept when `count >= min_count[level]` and support is sufficient; otherwise dropped with reason.
 

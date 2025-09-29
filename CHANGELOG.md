@@ -2,6 +2,13 @@
 
 All notable changes to this project’s documentation system are recorded here. The format follows Conventional Commits where practical. Dates use YYYY‑MM‑DD.
 
+## 2025-09-29 — docs: merge specs into module READMEs
+
+- docs: folded all logic specs from `docs/modules/` into the colocated module READMEs under `src/taxonomy/`, making them the canonical reference.
+- docs: expanded CLI documentation with command groups, parameter breakdowns, workflows, and troubleshooting guidance.
+- docs: refreshed the root README, documentation guide, and module index to reflect the single-track model.
+- cleanup: removed the now-redundant `docs/modules/` directory.
+
 ## 2025-09-29 — docs: initial consolidation and rollout complete
 
 - docs: established dual‑track documentation approach
