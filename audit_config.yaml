@@ -1,0 +1,18 @@
+environment: production
+create_dirs: true
+audit_mode:
+  enabled: true
+paths:
+  data_dir: data
+  output_dir: output/audit_runs
+  cache_dir: .cache/audit
+  logs_dir: logs/audit
+  metadata_dir: metadata/audit
+observability:
+  quarantine_enabled: true
+  quarantine_dir: metadata/audit/quarantine
+  precount_s1_records: true
+llm:
+  request_timeout_seconds: 45.0
+  retry_attempts: 4
+  default_profile: standard
