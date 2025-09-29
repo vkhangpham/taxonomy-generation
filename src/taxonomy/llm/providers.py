@@ -97,8 +97,6 @@ class ProviderManager:
             payload["timeout"] = options.timeout_seconds
         if options.stop:
             payload["stop"] = list(options.stop)
-        if options.retry_attempts is not None:
-            payload["retry_attempts"] = options.retry_attempts
         if options.top_p is not None:
             payload["top_p"] = options.top_p
         elif "top_p" in self._policy_defaults:
