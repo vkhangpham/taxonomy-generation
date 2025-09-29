@@ -130,7 +130,9 @@ def test_s1_pipeline_observability_records_failures(monkeypatch, tmp_path) -> No
     assert snapshot.counters["S1"]["candidates_out"] == 0
     assert snapshot.quarantine["total"] == 2
 
-    operations = [entry for entry in snapshot.operations if entry.operation == "provider_error"]
+    operations = [
+        entry for entry in snapshot.operations if entry.get("operation") == "provider_error"
+    ]
     assert len(operations) == 2
 
     metadata = json.loads(metadata_path.read_text(encoding="utf-8"))

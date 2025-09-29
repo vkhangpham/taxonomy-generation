@@ -66,12 +66,16 @@ class ExtractionMetrics:
         provider_errors = sum(
             1
             for entry in snapshot.operations
-            if entry.phase == "S1" and entry.operation == "provider_error"
+            if isinstance(entry, Mapping)
+            and entry.get("phase") == "S1"
+            and entry.get("operation") == "provider_error"
         )
         invalid_json = sum(
             1
             for entry in snapshot.operations
-            if entry.phase == "S1" and entry.operation == "invalid_json"
+            if isinstance(entry, Mapping)
+            and entry.get("phase") == "S1"
+            and entry.get("operation") == "invalid_json"
         )
         return cls(
             records_in=int(counters.get("records_in", 0)),

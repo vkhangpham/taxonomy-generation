@@ -129,16 +129,16 @@ class ObservabilityManifest:
     # Manifest payload assembly
     # ------------------------------------------------------------------
     def _format_operations(self, snapshot: ObservabilitySnapshot) -> list[Dict[str, Any]]:
-        operations = []
+        operations: list[Dict[str, Any]] = []
         for entry in snapshot.operations:
-            payload = entry.payload if isinstance(entry.payload, Mapping) else {}
+            payload = entry.get("payload", {}) if isinstance(entry, Mapping) else {}
             operations.append(
                 {
-                    "sequence": entry.sequence,
-                    "phase": entry.phase,
-                    "operation": entry.operation,
-                    "outcome": entry.outcome,
-                    "payload": dict(payload),
+                    "sequence": int(entry.get("sequence", 0)) if isinstance(entry, Mapping) else 0,
+                    "phase": entry.get("phase") if isinstance(entry, Mapping) else None,
+                    "operation": entry.get("operation") if isinstance(entry, Mapping) else None,
+                    "outcome": entry.get("outcome") if isinstance(entry, Mapping) else None,
+                    "payload": dict(payload) if isinstance(payload, Mapping) else payload,
                 }
             )
         operations.sort(key=lambda item: item["sequence"])

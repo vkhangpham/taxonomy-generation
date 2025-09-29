@@ -4,11 +4,13 @@ from __future__ import annotations
 import collections
 import logging
 import time
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping as CollectionsMapping, Sequence
 from contextlib import contextmanager
+from copy import deepcopy
 from dataclasses import asdict, dataclass, is_dataclass
 from threading import RLock
 import typing as t
+from typing import ContextManager
 
 from .determinism import stable_hash
 from .evidence import EvidenceSampler
@@ -35,12 +37,21 @@ class OperationLogEntry:
 
 @dataclass(frozen=True)
 class ObservabilitySnapshot:
-    """Composite snapshot used when exporting observability data."""
+    """Composite snapshot used when exporting observability data.
+
+    The ``checksum`` is computed from the fully sanitised payload emitted via
+    :meth:`ObservabilityContext.snapshot`, ensuring downstream systems can
+    detect drift when any sanitised content changes. ``snapshot_timestamp``
+    captures the monotonic seconds since the Unix epoch when the snapshot was
+    assembled, while ``captured_at`` provides the same moment formatted as a
+    UTC ISO-8601 string for human readability. Together these timestamps make
+    it clear exactly when the underlying state was captured.
+    """
 
     counters: t.Mapping[str, t.Mapping[str, t.Any]]
     quarantine: t.Mapping[str, t.Any]
     evidence: t.Mapping[str, t.Any]
-    operations: tuple[OperationLogEntry, ...]
+    operations: tuple[dict[str, t.Any], ...]
     performance: t.Mapping[str, t.Any]
     prompt_versions: t.Mapping[str, str]
     thresholds: t.Mapping[str, t.Any]
@@ -50,24 +61,60 @@ class ObservabilitySnapshot:
     captured_at: str
 
 
-def _sanitize(obj: t.Any) -> t.Any:
-    """Return a JSON-serialisable representation of ``obj`` with stable ordering."""
+_SANITIZE_DEFAULT_MAX_DEPTH = 8
+_SANITIZE_DEFAULT_MAX_ITEMS = 512
+_SANITIZE_DEPTH_SENTINEL = "__max_depth_exceeded__"
+
+
+def _sanitize(
+    obj: t.Any,
+    *,
+    max_depth: int = _SANITIZE_DEFAULT_MAX_DEPTH,
+    max_items: int = _SANITIZE_DEFAULT_MAX_ITEMS,
+    _depth: int = 0,
+) -> t.Any:
+    """Return a JSON-serialisable representation of ``obj`` with stable ordering.
+
+    The helper keeps recursion depth and collection sizes bounded so that
+    extremely large or deeply nested payloads cannot exhaust resources.
+    """
+
+    if max_depth is not None and _depth >= max_depth:
+        return _SANITIZE_DEPTH_SENTINEL
 
     if obj is None or isinstance(obj, (str, int, float, bool)):
         return obj
     if isinstance(obj, (bytes, bytearray)):
         return obj.decode("utf-8", errors="replace")
     if is_dataclass(obj):
-        return _sanitize(asdict(obj))
-    if isinstance(obj, Mapping):
-        items = sorted(((str(key), _sanitize(value)) for key, value in obj.items()), key=lambda item: item[0])
-        return {key: value for key, value in items}
+        return _sanitize(asdict(obj), max_depth=max_depth, max_items=max_items, _depth=_depth + 1)
+    if isinstance(obj, CollectionsMapping):
+        sorted_items = sorted(((str(key), value) for key, value in obj.items()), key=lambda item: item[0])
+        if max_items is not None:
+            sorted_items = sorted_items[:max_items]
+        return {
+            key: _sanitize(value, max_depth=max_depth, max_items=max_items, _depth=_depth + 1)
+            for key, value in sorted_items
+        }
     if isinstance(obj, (set, frozenset)):
-        return [_sanitize(item) for item in sorted(obj, key=lambda value: repr(value))]
+        sanitised_items = [
+            _sanitize(item, max_depth=max_depth, max_items=max_items, _depth=_depth + 1)
+            for item in obj
+        ]
+        sanitised_items.sort(key=lambda value: repr(value))
+        if max_items is not None:
+            sanitised_items = sanitised_items[:max_items]
+        return sanitised_items
     if isinstance(obj, Sequence) and not isinstance(obj, (str, bytes, bytearray)):
-        return [_sanitize(item) for item in obj]
+        seq = list(obj)
+        if max_items is not None:
+            seq = seq[:max_items]
+        return [
+            _sanitize(item, max_depth=max_depth, max_items=max_items, _depth=_depth + 1)
+            for item in seq
+        ]
     if hasattr(obj, "__dict__"):
-        return _sanitize(vars(obj))
+        return _sanitize(vars(obj), max_depth=max_depth, max_items=max_items, _depth=_depth + 1)
     return repr(obj)
 
 
@@ -91,6 +138,10 @@ class ObservabilityContext:
     ) -> None:
         self.run_id = run_id
         self.policy = policy
+        self._counter_registry_enabled = bool(getattr(policy, "counter_registry_enabled", True))
+        self._quarantine_logging_enabled = bool(getattr(policy, "quarantine_logging_enabled", True))
+        self._audit_trail_generation = bool(getattr(policy, "audit_trail_generation", True))
+        self._performance_tracking_enabled = bool(getattr(policy, "performance_tracking_enabled", True))
         seed = getattr(policy, "deterministic_sampling_seed", 42)
         rate = getattr(policy, "evidence_sampling_rate", 0.1)
         limit = getattr(policy, "max_evidence_samples_per_phase", 100)
@@ -102,14 +153,22 @@ class ObservabilityContext:
             seed=seed,
         )
         self._lock = RLock()
-        max_operation_entries = getattr(policy, "max_operation_log_entries", 5000) or 5000
-        try:
-            max_operation_entries = int(max_operation_entries)
-        except (TypeError, ValueError):
+        max_operation_entries_raw = getattr(policy, "max_operation_log_entries", None)
+        if max_operation_entries_raw is None:
             max_operation_entries = 5000
-        self._operations: collections.deque[OperationLogEntry] = collections.deque(
-            maxlen=max(1, max_operation_entries)
-        )
+        else:
+            try:
+                max_operation_entries = int(max_operation_entries_raw)
+            except (TypeError, ValueError):
+                max_operation_entries = 5000
+        if max_operation_entries < 0:
+            max_operation_entries = 0
+        self._max_operation_entries = max_operation_entries
+        self._operations: collections.deque[dict[str, t.Any]] | None
+        if max_operation_entries == 0:
+            self._operations = None
+        else:
+            self._operations = collections.deque(maxlen=max_operation_entries)
         self._operation_sequence = 0
         self._performance: dict[str, dict[str, t.Any]] = {}
         self._prompt_versions: dict[str, str] = {}
@@ -120,7 +179,7 @@ class ObservabilityContext:
     # Phase context helpers
     # ------------------------------------------------------------------
     @contextmanager
-    def phase(self, name: str) -> t.Iterator["PhaseHandle"]:
+    def phase(self, name: str) -> ContextManager["PhaseHandle"]:
         """Context manager that automatically pushes and pops the phase stack."""
 
         handle = PhaseHandle(self, name)
@@ -141,7 +200,7 @@ class ObservabilityContext:
         phase: str | None = None,
         label: str | None = None,
     ) -> None:
-        if not getattr(self.policy, "counter_registry_enabled", True):
+        if not self._counter_registry_enabled:
             return
         self.registry.increment(counter, value, phase=phase, label=label)
 
@@ -152,7 +211,7 @@ class ObservabilityContext:
         *,
         phase: str | None = None,
     ) -> None:
-        if not getattr(self.policy, "counter_registry_enabled", True):
+        if not self._counter_registry_enabled:
             return
         self.registry.set(counter, value, phase=phase)
 
@@ -162,7 +221,7 @@ class ObservabilityContext:
         *,
         phase: str | None = None,
     ) -> None:
-        if not getattr(self.policy, "counter_registry_enabled", True):
+        if not self._counter_registry_enabled:
             return
         self.registry.bulk_update(values, phase=phase)
 
@@ -174,7 +233,7 @@ class ObservabilityContext:
         item_id: str | None = None,
         payload: t.Mapping[str, t.Any] | None = None,
     ) -> None:
-        if getattr(self.policy, "quarantine_logging_enabled", True):
+        if self._quarantine_logging_enabled:
             self.quarantine.quarantine(
                 phase=phase,
                 reason=reason,
@@ -191,7 +250,7 @@ class ObservabilityContext:
         payload: t.Mapping[str, t.Any],
         weight: float = 1.0,
     ) -> None:
-        if getattr(self.policy, "audit_trail_generation", True):
+        if self._audit_trail_generation:
             self.evidence.consider(
                 phase=phase,
                 category=category,
@@ -213,15 +272,16 @@ class ObservabilityContext:
             sanitized_payload = _sanitize(payload or {})
             if not isinstance(sanitized_payload, dict):
                 sanitized_payload = {"value": sanitized_payload}
-            entry = OperationLogEntry(
-                sequence=self._operation_sequence,
-                phase=phase,
-                operation=operation,
-                outcome=outcome,
-                payload=sanitized_payload,
-            )
-            self._operations.append(entry)
-            return entry
+            entry_payload = {
+                "sequence": self._operation_sequence,
+                "phase": phase,
+                "operation": operation,
+                "outcome": outcome,
+                "payload": sanitized_payload,
+            }
+            if self._operations is not None:
+                self._operations.append(entry_payload)
+            return OperationLogEntry(**entry_payload)
 
     def record_performance(
         self,
@@ -229,26 +289,119 @@ class ObservabilityContext:
         phase: str,
         metrics: t.Mapping[str, t.Any],
     ) -> None:
-        if not getattr(self.policy, "performance_tracking_enabled", True):
+        if not self._performance_tracking_enabled:
             return
         with self._lock:
-            self._performance[phase] = dict(metrics)
+            sanitised_metrics = _sanitize(metrics)
+            if not isinstance(sanitised_metrics, dict):
+                sanitised_metrics = {"value": sanitised_metrics}
+            self._performance[phase] = sanitised_metrics
 
     def register_prompt_version(self, prompt: str, version: str) -> None:
         with self._lock:
-            self._prompt_versions[prompt] = version
+            self._prompt_versions[prompt] = deepcopy(version)
 
     def register_threshold(self, name: str, value: t.Any) -> None:
         with self._lock:
-            self._thresholds[name] = value
+            self._thresholds[name] = deepcopy(value)
 
     def register_seed(self, name: str, value: int) -> None:
         with self._lock:
-            self._seeds[name] = int(value)
+            copied_value = deepcopy(value)
+            self._seeds[name] = int(copied_value)
 
     # ------------------------------------------------------------------
     # Export helpers
     # ------------------------------------------------------------------
+    def _resolve_max_quarantine_items(self) -> int | None:
+        raw_value = getattr(self.policy, "max_quarantine_items", None)
+        if raw_value is None:
+            return None
+        try:
+            value = int(raw_value)
+        except (TypeError, ValueError):
+            return None
+        return value if value >= 0 else None
+
+    def _snapshot_counters(self) -> dict[str, t.Any]:
+        counters_raw = self.registry.as_dict().get("counters", {})
+        sanitised = _sanitize(counters_raw)
+        return sanitised if isinstance(sanitised, dict) else {}
+
+    def _snapshot_quarantine(self) -> dict[str, t.Any]:
+        snapshot = self.quarantine.snapshot()
+        limit = self._resolve_max_quarantine_items()
+        items = list(snapshot.items)
+        if limit is None:
+            limited_items = items
+        elif limit == 0:
+            limited_items = []
+        else:
+            limited_items = items[-limit:]
+        return {
+            "total": snapshot.total,
+            "by_reason": _sanitize(snapshot.by_reason),
+            "items": [
+                {
+                    "phase": item.phase,
+                    "reason": item.reason,
+                    "item_id": item.item_id,
+                    "payload": _sanitize(item.payload),
+                    "sequence": item.sequence,
+                }
+                for item in limited_items
+            ],
+        }
+
+    def _snapshot_evidence(self) -> dict[str, t.Any]:
+        evidence_raw = self.evidence.as_dict()
+        sanitised = _sanitize(evidence_raw)
+        return sanitised if isinstance(sanitised, dict) else {}
+
+    def _snapshot_operations(self) -> list[dict[str, t.Any]]:
+        with self._lock:
+            if not self._operations:
+                return []
+            entries = [deepcopy(entry) for entry in self._operations]
+        return [
+            _sanitize(entry) if isinstance(entry, dict) else _sanitize(dict(entry))
+            for entry in entries
+        ]
+
+    def _snapshot_performance(self) -> dict[str, t.Any]:
+        with self._lock:
+            items = sorted(self._performance.items())
+            return {phase: deepcopy(metrics) for phase, metrics in items}
+
+    def _snapshot_prompt_versions(self) -> dict[str, t.Any]:
+        with self._lock:
+            items = sorted(self._prompt_versions.items())
+            return {prompt: deepcopy(version) for prompt, version in items}
+
+    def _snapshot_thresholds(self) -> dict[str, t.Any]:
+        with self._lock:
+            items = sorted(self._thresholds.items())
+            return {name: _sanitize(value) for name, value in items}
+
+    def _snapshot_seeds(self) -> dict[str, int]:
+        with self._lock:
+            seeds: dict[str, int] = {}
+            for name, value in sorted(self._seeds.items()):
+                try:
+                    seeds[name] = int(value)
+                except (TypeError, ValueError):
+                    _LOGGER.warning(
+                        "Skipping invalid observability seed '%s' with value %r", name, value
+                    )
+            return seeds
+
+    def _snapshot_metadata(self, payload: dict[str, t.Any]) -> tuple[str, float, str]:
+        checksum = stable_hash(payload)
+        timestamp_ns = time.time_ns()
+        snapshot_timestamp = timestamp_ns / 1_000_000_000
+        captured_at = _format_utc_timestamp(timestamp_ns)
+        return checksum, snapshot_timestamp, captured_at
+
     def snapshot(self) -> ObservabilitySnapshot:
         """Return a best-effort snapshot plus capture metadata.
 
@@ -261,90 +414,35 @@ class ObservabilityContext:
         keep payloads bounded.
         """
 
-        counters_raw = self.registry.as_dict()["counters"]
-        quarantine_snapshot = self.quarantine.snapshot()
-        evidence_raw = self.evidence.as_dict()
-
-        max_quarantine_items = getattr(self.policy, "max_quarantine_items", None)
-        try:
-            if max_quarantine_items is not None:
-                max_quarantine_items = max(1, int(max_quarantine_items))
-        except (TypeError, ValueError):
-            max_quarantine_items = None
-
-        items = quarantine_snapshot.items
-        if max_quarantine_items:
-            items = items[-max_quarantine_items:]
-
-        with self._lock:
-            operations = tuple(self._operations)
-            performance_raw = {
-                phase: dict(metrics)
-                for phase, metrics in sorted(self._performance.items())
-            }
-            prompt_versions_raw = dict(sorted(self._prompt_versions.items()))
-            thresholds_raw = dict(sorted(self._thresholds.items()))
-            seeds_raw: dict[str, int] = {}
-            for name, value in sorted(self._seeds.items()):
-                try:
-                    seeds_raw[name] = int(value)
-                except (TypeError, ValueError):
-                    _LOGGER.warning("Skipping invalid observability seed '%s'", name)
-
-        sanitized_counters = _sanitize(counters_raw)
-        sanitized_quarantine = {
-            "total": quarantine_snapshot.total,
-            "by_reason": _sanitize(quarantine_snapshot.by_reason),
-            "items": [
-                {
-                    "phase": item.phase,
-                    "reason": item.reason,
-                    "item_id": item.item_id,
-                    "payload": _sanitize(item.payload),
-                    "sequence": item.sequence,
-                }
-                for item in items
-            ],
-        }
-        sanitized_evidence = _sanitize(evidence_raw)
-        sanitized_operations = [
-            {
-                "sequence": entry.sequence,
-                "phase": entry.phase,
-                "operation": entry.operation,
-                "outcome": entry.outcome,
-                "payload": _sanitize(entry.payload),
-            }
-            for entry in operations
-        ]
-        sanitized_performance = _sanitize(performance_raw)
-        sanitized_prompt_versions = _sanitize(prompt_versions_raw)
-        sanitized_thresholds = _sanitize(thresholds_raw)
-        sanitized_seeds = _sanitize(seeds_raw)
+        counters = self._snapshot_counters()
+        quarantine = self._snapshot_quarantine()
+        evidence = self._snapshot_evidence()
+        operations = tuple(self._snapshot_operations())
+        performance = self._snapshot_performance()
+        prompt_versions = self._snapshot_prompt_versions()
+        thresholds = self._snapshot_thresholds()
+        seeds = self._snapshot_seeds()
 
         payload = {
-            "counters": sanitized_counters,
-            "quarantine": sanitized_quarantine,
-            "evidence": sanitized_evidence,
-            "operations": sanitized_operations,
-            "performance": sanitized_performance,
-            "prompt_versions": sanitized_prompt_versions,
-            "thresholds": sanitized_thresholds,
-            "seeds": sanitized_seeds,
+            "counters": counters,
+            "quarantine": quarantine,
+            "evidence": evidence,
+            "operations": list(operations),
+            "performance": performance,
+            "prompt_versions": prompt_versions,
+            "thresholds": thresholds,
+            "seeds": seeds,
         }
-        checksum = stable_hash(payload)
-        timestamp_ns = time.time_ns()
-        snapshot_timestamp = timestamp_ns / 1_000_000_000
-        captured_at = _format_utc_timestamp(timestamp_ns)
+        checksum, snapshot_timestamp, captured_at = self._snapshot_metadata(payload)
         return ObservabilitySnapshot(
-            counters=sanitized_counters,
-            quarantine=sanitized_quarantine,
-            evidence=sanitized_evidence,
+            counters=counters,
+            quarantine=quarantine,
+            evidence=evidence,
             operations=operations,
-            performance=sanitized_performance,
-            prompt_versions=sanitized_prompt_versions,
-            thresholds=sanitized_thresholds,
-            seeds=sanitized_seeds,
+            performance=performance,
+            prompt_versions=prompt_versions,
+            thresholds=thresholds,
+            seeds=seeds,
             checksum=checksum,
             snapshot_timestamp=snapshot_timestamp,
             captured_at=captured_at,
@@ -358,16 +456,7 @@ class ObservabilityContext:
             "counters": snap.counters,
             "quarantine": snap.quarantine,
             "evidence": snap.evidence,
-            "operations": [
-                {
-                    "sequence": entry.sequence,
-                    "phase": entry.phase,
-                    "operation": entry.operation,
-                    "outcome": entry.outcome,
-                    "payload": _sanitize(entry.payload),
-                }
-                for entry in snap.operations
-            ],
+            "operations": list(snap.operations),
             "performance": snap.performance,
             "prompt_versions": snap.prompt_versions,
             "thresholds": snap.thresholds,

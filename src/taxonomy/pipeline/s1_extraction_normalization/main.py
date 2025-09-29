@@ -64,9 +64,11 @@ def extract_candidates(
     obs_context = observability or extractor.observability
     snapshot_before = obs_context.snapshot() if obs_context is not None else None
     before_counters = snapshot_before.counters.get("S1", {}) if snapshot_before else {}
-    before_op_sequence = (
-        snapshot_before.operations[-1].sequence if snapshot_before and snapshot_before.operations else 0
-    )
+    before_op_sequence = 0
+    if snapshot_before and snapshot_before.operations:
+        last_operation = snapshot_before.operations[-1]
+        if isinstance(last_operation, dict):
+            before_op_sequence = int(last_operation.get("sequence", 0))
     before_quarantine_sequence = 0
     if snapshot_before:
         items_before = snapshot_before.quarantine.get("items", [])
@@ -117,9 +119,9 @@ def extract_candidates(
             provider_errors = sum(
                 1
                 for entry in snapshot_after.operations
-                if entry.phase == "S1"
-                and entry.operation == "provider_error"
-                and entry.sequence > before_op_sequence
+                if entry.get("phase") == "S1"
+                and entry.get("operation") == "provider_error"
+                and int(entry.get("sequence", 0)) > before_op_sequence
             )
             quarantined = 0
             items_after = snapshot_after.quarantine.get("items", [])
