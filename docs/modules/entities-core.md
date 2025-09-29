@@ -1,6 +1,6 @@
 # Entities (Domain) — Logic Spec
 
-See also: `docs/logic-spec.md`
+See also: `docs/logic-spec.md`, `docs/modules/hierarchy-assembly.md`, `docs/modules/validation.md`
 
 Purpose
 - Specify semantic contracts for core domain entities and their lifecycle across S0–S3.
@@ -8,29 +8,36 @@ Purpose
 Core Tech
 - Pydantic models with validators for canonicalization and invariants.
 
-Entities (semantic)
-- Provenance — origin of a source snippet `{institution, url?, section?, fetched_at}`.
-- SourceMeta — page-level metadata (language, charset, hints).
-- SourceRecord — extracted text block with `{text, provenance, meta}`.
-- Candidate — normalized label proposal with aliases/evidence.
-- Concept — deduplicated, validated unit with level and parent links.
-- ValidationFinding — per-signal result `{passed, reason, evidence?}`.
-- MergeOp/SplitOp — consolidation edits with rationale and provenance.
+Inputs/Outputs (semantic)
+- Input: upstream phase outputs (S0–S3) that instantiate or transform entities.
+- Output: validated entities persisted in artifacts/manifests: `SourceRecord[]`, `Candidate[]`, `Concept[]`, `MergeOp[]`/`SplitOp[]`.
 
 Rules & Invariants
 - URLs normalized (scheme+host lowercased, no fragment); invalid schemes rejected.
-- `Concept` carries stable id, normalized label, level in [0..3], and parent constraints enforced by hierarchy assembly.
-- Provenance timestamps are UTC; evidence text snippets are length‑bounded by policy.
+- `Concept` carries stable id, normalized label, level in [0..3]; parent constraints enforced by hierarchy assembly.
+- Provenance timestamps are UTC; evidence text snippets are length‑bounded per policy.
 
-Lifecycle Through Pipeline
-- S0 produces `SourceRecord[]` with normalized provenance and meta.
-- S1 converts records to `Candidate[]` with normalized labels and alias bundles.
-- S2 filters/aggregates with frequency/support thresholds, yielding high‑confidence candidates.
-- S3 verifies single‑token/label policy compliance and upgrades to `Concept[]` on pass.
-- Consolidation applies `MergeOp`/`SplitOp` to reconcile duplicates and disambiguations.
+Core Logic
+- Define entity schemas with field validators for normalization and invariant checks.
+- Enforce canonical label rules at creation time; reject/repair inputs that violate policy.
+- Provide upgrade flows: `Candidate → Concept` after S3 policy verification; support consolidation via `MergeOp`/`SplitOp`.
+
+Algorithms & Parameters
+- Intentional omission: thresholds and limits (e.g., evidence length, alias counts) live in policy modules under `src/taxonomy/config/policies/*` and are versioned in `docs/policies.md`.
+
+Failure Handling
+- Validation errors yield structured findings and raise explicit exceptions; invalid instances are quarantined, not silently corrected.
+- On unknown URL schemes or malformed provenance, reject the instance and attach rationale for audit.
 
 Observability
-- Entities stamped into manifests with counts and level distributions; evidence sampling rate controlled by policy.
+- Manifests include entity counts, level distributions, and sampled evidence; sampling rate is policy‑controlled.
+
+Acceptance Tests
+- Creating a `Concept` with an invalid level outside [0..3] raises a validation error.
+- Promoting a `Candidate` that fails single‑token policy does not produce a `Concept` and records a failure rationale.
+
+Open Questions
+- Stable id derivation: fully deterministic from label vs. salted hash to minimize collisions.
 
 Examples
 - Candidate → Concept promotion:
@@ -41,4 +48,3 @@ Examples
   ```json
   {"id":"cv","label":"computer vision","level":2,"parents":["ml"]}
   ```
-
