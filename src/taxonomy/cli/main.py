@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import List, Optional
+from typing import Any, Callable, List, Optional
 
 import typer
 from rich.table import Table
@@ -11,7 +11,44 @@ from . import development, management, pipeline, postprocess, utilities
 from .common import CLIError, configure_state, console, parse_override
 
 
-app = typer.Typer(
+class TaxonomyTyper(typer.Typer):
+    """Typer subclass that supports registering exception handlers."""
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self._exception_handlers: list[tuple[type[BaseException], Callable[[BaseException], Any]]] = []
+
+    def exception_handler(
+        self, exception_type: type[BaseException]
+    ) -> Callable[[Callable[[BaseException], Any]], Callable[[BaseException], Any]]:
+        def decorator(handler: Callable[[BaseException], Any]) -> Callable[[BaseException], Any]:
+            self._exception_handlers.append((exception_type, handler))
+            return handler
+
+        return decorator
+
+    def _resolve_handler(self, exception: BaseException) -> Callable[[BaseException], Any] | None:
+        for registered_type, handler in self._exception_handlers:
+            if isinstance(exception, registered_type):
+                return handler
+        return None
+
+    def __call__(self, *args: Any, **kwargs: Any) -> Any:
+        try:
+            return super().__call__(*args, **kwargs)
+        except BaseException as exc:  # pragma: no cover - CLI surface behaviour
+            handler = self._resolve_handler(exc)
+            if handler is None:
+                raise
+            result = handler(exc)
+            if isinstance(result, typer.Exit):
+                raise result
+            if isinstance(result, BaseException):
+                raise result
+            return result
+
+
+app = TaxonomyTyper(
     add_completion=False,
     help="""
     Run taxonomy generation tasks, manage checkpoints, and invoke development
@@ -19,6 +56,14 @@ app = typer.Typer(
     """.strip(),
     no_args_is_help=True,
 )
+
+
+@app.exception_handler(CLIError)
+def handle_cli_error(exception: CLIError) -> typer.Exit:
+    """Render ``CLIError`` messages without stack traces."""
+
+    console.print(f"[bold red]Error:[/bold red] {exception}")
+    return typer.Exit(code=2)
 
 
 @app.callback()
@@ -58,19 +103,15 @@ def main(
 ) -> None:
     """Configure shared CLI state prior to executing subcommands."""
 
-    try:
-        overrides = [parse_override(item) for item in override]
-        configure_state(
-            ctx,
-            environment=environment,
-            overrides=overrides,
-            run_id=run_id,
-            verbose=verbose,
-            disable_observability=no_observability,
-        )
-    except CLIError as cli_err:
-        console.print(f"[bold red]Error:[/bold red] {cli_err}")
-        raise typer.Exit(code=2) from cli_err
+    overrides = [parse_override(item) for item in override]
+    configure_state(
+        ctx,
+        environment=environment,
+        overrides=overrides,
+        run_id=run_id,
+        verbose=verbose,
+        disable_observability=no_observability,
+    )
 
     if verbose:
         state = ctx.obj
