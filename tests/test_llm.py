@@ -191,7 +191,10 @@ def test_llm_client_records_retry_metrics(client: LLMClient) -> None:
 
 def test_dspy_adapter_extracts_singleton_list_string() -> None:
     payload = ['{"candidates": []}']
-    assert DSPyProviderAdapter._extract_text(payload) == '{"candidates": []}'
+    raw = DSPyProviderAdapter._extract_text(payload)
+    assert raw == '{"candidates": []}'
+    normalised = DSPyProviderAdapter._normalise_payload(raw)
+    assert normalised == "[]"
 
 
 def test_dspy_adapter_handles_completion_attribute_wrapping_list() -> None:
@@ -201,3 +204,22 @@ def test_dspy_adapter_handles_completion_attribute_wrapping_list() -> None:
 
     response = Response([{"key": "value"}])
     assert DSPyProviderAdapter._extract_text(response) == '{"key": "value"}'
+
+
+def test_dspy_adapter_extracts_candidates_dict_as_array() -> None:
+    payload = {
+        "candidates": [
+            {"label": "Accounting", "normalized": "accounting", "aliases": ["Accounting"], "parents": []}
+        ]
+    }
+    extracted = DSPyProviderAdapter._extract_text(payload)
+    assert json.loads(extracted) == payload["candidates"]
+
+
+def test_dspy_adapter_normalises_single_candidate_object() -> None:
+    payload = '{"label": "Accounting", "normalized": "accounting", "aliases": [], "parents": []}'
+    raw = DSPyProviderAdapter._extract_text(payload)
+    normalised = DSPyProviderAdapter._normalise_payload(raw)
+    parsed = json.loads(normalised)
+    assert isinstance(parsed, list)
+    assert parsed[0]["label"] == "Accounting"

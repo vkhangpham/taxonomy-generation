@@ -139,6 +139,7 @@ class DSPyProviderAdapter:
             raise ProviderError(str(exc), retryable=True) from exc
 
         content = self._extract_text(raw_response)
+        content = self._normalise_payload(content)
         usage = self._extract_usage(raw_response)
         return ProviderResponse(content=content, usage=usage)
 
@@ -219,6 +220,14 @@ class DSPyProviderAdapter:
             completion = getattr(raw_response, "completion")
             return DSPyProviderAdapter._extract_text(completion)
         if isinstance(raw_response, dict):
+            if "candidates" in raw_response and isinstance(raw_response["candidates"], (list, tuple)):
+                return json.dumps(list(raw_response["candidates"]))
+            if {
+                "label",
+                "normalized",
+                "aliases",
+            }.issubset(raw_response.keys()) and isinstance(raw_response.get("aliases"), (list, tuple)):
+                return json.dumps([raw_response])
             for key in ("text", "completion", "content"):
                 if key in raw_response:
                     return DSPyProviderAdapter._extract_text(raw_response[key])
@@ -240,6 +249,27 @@ class DSPyProviderAdapter:
             usage.prompt_tokens = int(usage_data.get("prompt_tokens", usage.prompt_tokens))
             usage.completion_tokens = int(usage_data.get("completion_tokens", usage.completion_tokens))
         return usage
+
+    @staticmethod
+    def _normalise_payload(content: str) -> str:
+        candidate = content.strip()
+        if not candidate:
+            return content
+        try:
+            parsed = json.loads(candidate)
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return content
+
+        if isinstance(parsed, dict):
+            if "candidates" in parsed and isinstance(parsed["candidates"], (list, tuple)):
+                return json.dumps(list(parsed["candidates"]))
+            if {
+                "label",
+                "normalized",
+                "aliases",
+            }.issubset(parsed.keys()) and isinstance(parsed.get("aliases"), (list, tuple)):
+                return json.dumps([parsed])
+        return content
 
 
 def build_provider_manager(settings) -> ProviderManager:

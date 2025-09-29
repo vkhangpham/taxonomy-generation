@@ -45,7 +45,7 @@ def write_candidates(candidates: Iterable[Candidate], output_path: str | Path) -
     ensure_directory(path.parent)
     with path.open("w", encoding="utf-8") as handle:
         for candidate in candidates:
-            handle.write(candidate.model_dump_json(sort_keys=True))
+            handle.write(json.dumps(candidate.model_dump(), sort_keys=True))
             handle.write("\n")
     return path.resolve()
 
