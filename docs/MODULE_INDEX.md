@@ -38,7 +38,7 @@ CLI
 - `cli/` → `docs/modules/cli-interfaces.md` — ✅
 
 Notes
-- All module docs should conform to `docs/DOCUMENTATION_GUIDE.md` and cross‑reference `docs/logic-spec.md`.
+- All module docs should conform to `docs/DOCUMENTATION_GUIDE.md` and cross‑reference `docs/functional-blueprint.md`.
 - Status should be updated when behavior changes, policies bump, or interfaces drift.
 - Per‑module READMEs provide quick reference and practical usage; detailed specs live in `docs/modules/`.
 
@@ -80,7 +80,17 @@ CLI
 - `src/taxonomy/cli/README.md` — ✅ Complete
 
 See Also
-- Full mapping with detailed doc links: `docs/MODULE_README_INVENTORY.md`.
+- Functional blueprint (logic specification): `docs/functional-blueprint.md`.
+- Changelog for documentation system updates: `CHANGELOG.md`.
+
+## Documentation Maturity & Maintenance
+
+- The documentation system uses a dual‑track model: quick‑reference READMEs adjacent to code, and comprehensive specs under `docs/modules/`.
+- Keep these in sync:
+  - Update module specs when behavior, thresholds, or contracts change.
+  - Update package READMEs when APIs or usage change.
+  - Reflect policy/version changes in `docs/policies.md` and reference them in affected specs.
+- Record notable documentation‑level changes in `CHANGELOG.md`.
 
 ## README Rollout Summary
 

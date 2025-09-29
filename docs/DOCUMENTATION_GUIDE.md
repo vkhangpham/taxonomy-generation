@@ -6,7 +6,7 @@ Purpose
 
 Scope
 - Applies to all docs in `docs/modules/` and any new module documentation.
-- Builds on patterns in `docs/modules/raw-extraction.md`, `docs/modules/llm.md`, and the cross-cutting `docs/logic-spec.md`.
+- Builds on patterns in `docs/modules/raw-extraction.md`, `docs/modules/llm.md`, and the cross‑cutting `docs/functional-blueprint.md`.
 
 Canonical Structure (per module doc)
 - Title — “<Module Name> — Logic Spec”.
@@ -27,7 +27,7 @@ Writing Style
 - Prefer bullets over paragraphs; keep each bullet one line when possible.
 - Include concrete JSON examples; avoid prose-only descriptions for data.
 - Keep numbers explicit (e.g., thresholds with default and range) and tie to policies when relevant.
-- Use stable terminology consistent with `docs/logic-spec.md` and policy names in `src/taxonomy/config/policies`.
+- Use stable terminology consistent with `docs/functional-blueprint.md` and policy names in `src/taxonomy/config/policies`.
 
 File Naming & Placement
 - Place new module docs in `docs/modules/`.
@@ -36,7 +36,7 @@ File Naming & Placement
 
 Cross-Referencing
 - At the top of each module doc, include a “See also” line referencing:
-  - `docs/logic-spec.md` (global concepts/policies), and
+  - `docs/functional-blueprint.md` (global concepts/policies), and
   - any sibling module docs it interacts with directly.
 - Link to policy modules by name (e.g., “validation policy: `src/taxonomy/config/policies/validation.py`”).
 
@@ -52,7 +52,7 @@ Review Checklist (per module doc)
 - Rules & Invariants are testable and map to existing or planned tests.
 - Observability counters/fields are named and discoverable in manifests/logs.
 - Examples use deterministic, minimal JSON and reflect current policies.
-- Cross-references to `docs/logic-spec.md` and relevant module docs are present.
+- Cross‑references to `docs/functional-blueprint.md` and relevant module docs are present.
 
 Versioning & Policy Changes
 - Any thresholds, label rules, or identity decisions must:
@@ -61,8 +61,8 @@ Versioning & Policy Changes
   - surface in emitted manifests as per observability rules.
 
 How to Add a New Module Doc
-- Copy `docs/MODULE_TEMPLATE.md` to `docs/modules/<name>.md`.
-- Fill each section, keeping bullets concise and testable.
+- Start from an existing, representative spec (e.g., `docs/modules/raw-extraction.md`) and use it as a template.
+- Fill each canonical section, keeping bullets concise and testable.
 - Add “See also” references and status to `docs/MODULE_INDEX.md`.
 - Submit with links to manifests or regression diffs when applicable.
 
@@ -90,7 +90,7 @@ When to Use
 - Use the module spec in `docs/modules/` for full, implementation‑agnostic logic, invariants, and acceptance scenarios.
 
 Template
-- Start from `docs/README_TEMPLATE.md` and keep sections concise:
+- Start from a strong existing README (e.g., `src/taxonomy/pipeline/s3_token_verification/README.md`) and keep sections concise:
   - Purpose (1–2 sentences)
   - Key APIs (classes/functions)
   - Data Contracts (inputs/outputs, error surfaces)
@@ -108,5 +108,11 @@ Standards
 - Update READMEs when public APIs, data contracts, or configuration keys change.
 
 Tracking
-- Track README coverage in `docs/MODULE_INDEX.md` and the detailed mapping in `docs/MODULE_README_INVENTORY.md`.
+- Track README coverage in `docs/MODULE_INDEX.md`.
 
+## Maintenance
+
+- Keep detailed specs and READMEs synchronized: when APIs, thresholds, or invariants change, update both the relevant spec and any affected READMEs.
+- For policy changes, bump versions and document deltas in `docs/policies.md`; reference the new version in impacted module docs.
+- Record notable documentation system changes (structure, conventions, large rollouts) in `CHANGELOG.md`.
+- The functional blueprint at `docs/functional-blueprint.md` serves as the canonical logic reference; avoid duplicating its content in module docs.
