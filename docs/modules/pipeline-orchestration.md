@@ -1,37 +1,39 @@
 # Pipeline & Orchestration — Logic Spec
 
-See also: `docs/logic-spec.md`, `docs/modules/validation.md`, `docs/modules/hierarchy-assembly.md`
+See also: `docs/logic-spec.md`, `docs/modules/validation.md`
+Cross‑references:
+- Core abstractions — `docs/modules/pipeline-core-abstractions.md`
+- Phases & orchestrator — `docs/modules/orchestration-phases.md`
+- CLI integration — `docs/modules/cli-pipeline-integration.md`
+- Stage specs — `docs/modules/s0-raw-extraction-pipeline.md`, `docs/modules/s1-extraction-normalization-pipeline.md`, `docs/modules/s2-frequency-filtering-pipeline.md`, `docs/modules/s3-token-verification-pipeline.md`, `docs/modules/hierarchy-assembly-pipeline.md`
 
 Purpose
-- Define the `Pipeline` and `PipelineStep` abstractions and orchestrate S0–S3 phases plus consolidation/post‑processing.
-- Manage checkpoints and resume semantics across steps with deterministic execution and manifest emission.
+- Define the `Pipeline`/`PipelineStep` abstractions and orchestrate S0–S3 plus final assembly.
+- Manage checkpoints and resume semantics with deterministic execution and manifest emission.
 
 Core Tech
-- Pure-Python orchestration with a lightweight `Pipeline` container and `Protocol` for steps (`src/taxonomy/pipeline/__init__.py`).
-- Orchestration entry points and phase runners in `src/taxonomy/orchestration/`.
-- Checkpointed artifacts under `output/runs/<run_id>/`; logs under `logs/`.
+- `Pipeline` + `PipelineStep` in `src/taxonomy/pipeline/__init__.py`.
+- Orchestration in `src/taxonomy/orchestration/` with `TaxonomyOrchestrator`, `PhaseManager`, and `PhaseContext`.
+- Checkpoints via `CheckpointManager` with artifacts under `output/runs/<run_id>/` and logs in `logs/`.
 
 Inputs/Outputs (semantic)
 - Input: Settings + policies; optional `resume_phase` token.
 - Output: Run manifest with per‑phase summaries, counters, artifacts paths, and policy/version stamps.
 
 Rules & Invariants
-- Phase ordering: S0 → S1 → S2 → S3 → consolidation → post‑processing → finalization.
-- Resume semantics: when `resume_phase=X`, execute X and all subsequent phases; do not repeat earlier phases unless explicitly requested.
+- Phase ordering: levelwise generation (S1 L0→L3), consolidation (S2), post‑processing (S3), finalization (assembly). S0 is runnable independently for raw extraction.
+- Resume semantics: `resume_phase=X` executes X and subsequent phases; earlier phases remain intact unless forced.
 - Determinism: respect seeds, fixed ordering, and stable serialization to ensure reproducible manifests.
 - Checkpoints: each phase writes artifacts to a phase‑scoped directory and updates the run manifest atomically.
 
 Core Logic
-- Build `Pipeline` and register step instances in order with unique `name`s matching phase identifiers (e.g., `S0_raw_extraction`).
-- Execute steps via `Pipeline.execute(resume_from?)`, which selects the starting index by `name` and runs to completion.
-- Phase runners (`orchestration/phases.py`) encapsulate multi‑level operations:
-  - Levelwise generation (e.g., L0→L3) with per‑level summaries.
-  - Consolidation across levels (dedup/disambiguation merge results).
-  - Post‑processing and final manifest assembly.
+- `TaxonomyOrchestrator.run()` prepares `PhaseContext`, then `PhaseManager.execute_all(resume_from)` runs ordered phases with resume.
+- Within phases, `Pipeline` executes concrete `PipelineStep`s (see core abstractions doc) and records step checkpoints.
+- Levelwise generation runs S1 for L0→L3 with per‑level summaries; consolidation aggregates frequency; post‑processing verifies tokens; finalization assembles the hierarchy and emits the run manifest.
 
 Algorithms & Parameters
-- Not algorithm-heavy; parameterization comes from policies in `src/taxonomy/config/policies/*` and `Settings`.
-- Defaults and thresholds live with the policy classes; the orchestrator reads and stamps their versions.
+- Parameterization comes from policies in `src/taxonomy/config/policies/*` and `Settings`.
+- Defaults and thresholds live with the policy classes; the orchestrator stamps policy versions into the manifest.
 
 Failure Handling
 - Step failure quarantines the phase outputs and records error context in the run manifest; subsequent phases are skipped.
@@ -41,6 +43,9 @@ Observability
 - Counters: per‑phase `ok`, `failed`, `duration_sec`; aggregate token usage if LLM is invoked downstream.
 - Artifacts: paths to phase outputs, consolidated files, and final manifests in `output/runs/<run_id>/`.
 - Logs: structured log file path exposed via `Settings.paths.logs_dir`.
+
+CLI Mapping
+- See `docs/modules/cli-pipeline-integration.md` for comprehensive command mapping and examples.
 
 Acceptance Tests
 - `python main.py validate --environment development` verifies configuration loads and merges without running steps.
