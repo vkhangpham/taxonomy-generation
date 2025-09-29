@@ -1,0 +1,855 @@
+[
+  {
+    "keyword": "engineering",
+    "evidence_colleges": [
+      "University of Michigan - Climate and Space Sciences & Engineering",
+      "Yale University - Engineering & Applied Science",
+      "MIT School of Engineering",
+      "Stanford School of Engineering",
+      "UC Berkeley College of Engineering"
+    ],
+    "expected": true
+  },
+  {
+    "keyword": "medicine",
+    "evidence_colleges": [
+      "University of Chicago - Medicine, Pritzker School of",
+      "Yale University School of Medicine",
+      "Harvard Medical School",
+      "Johns Hopkins School of Medicine"
+    ],
+    "expected": true
+  },
+  {
+    "keyword": "humanities",
+    "evidence_colleges": [
+      "University of Chicago - Humanities Division",
+      "Yale University - Humanities",
+      "Stanford School of Humanities and Sciences",
+      "Harvard Division of Arts and Humanities"
+    ],
+    "expected": true
+  },
+  {
+    "keyword": "mathematics",
+    "evidence_colleges": [
+      "MIT Department of Mathematics",
+      "University of Chicago - Mathematics",
+      "Princeton Department of Mathematics",
+      "Stanford Department of Mathematics"
+    ],
+    "expected": true
+  },
+  {
+    "keyword": "physics",
+    "evidence_colleges": [
+      "MIT Department of Physics",
+      "Stanford Department of Physics",
+      "Harvard Department of Physics",
+      "Princeton Department of Physics"
+    ],
+    "expected": true
+  },
+  {
+    "keyword": "chemistry",
+    "evidence_colleges": [
+      "MIT Department of Chemistry",
+      "UC Berkeley College of Chemistry",
+      "Harvard Department of Chemistry",
+      "Caltech Division of Chemistry"
+    ],
+    "expected": true
+  },
+  {
+    "keyword": "business",
+    "evidence_colleges": [
+      "Harvard Business School",
+      "Wharton School of Business",
+      "Stanford Graduate School of Business",
+      "MIT Sloan School of Management"
+    ],
+    "expected": true
+  },
+  {
+    "keyword": "law",
+    "evidence_colleges": [
+      "Harvard Law School",
+      "Yale Law School",
+      "Stanford Law School",
+      "Columbia Law School"
+    ],
+    "expected": true
+  },
+  {
+    "keyword": "psychology",
+    "evidence_colleges": [
+      "Stanford Department of Psychology",
+      "Harvard Department of Psychology",
+      "Yale Department of Psychology",
+      "Princeton Department of Psychology"
+    ],
+    "expected": true
+  },
+  {
+    "keyword": "sociology",
+    "evidence_colleges": [
+      "Harvard Department of Sociology",
+      "UC Berkeley Department of Sociology",
+      "Princeton Department of Sociology",
+      "Chicago Department of Sociology"
+    ],
+    "expected": true
+  },
+  {
+    "keyword": "philosophy",
+    "evidence_colleges": [
+      "Harvard Department of Philosophy",
+      "Princeton Department of Philosophy",
+      "Oxford Faculty of Philosophy",
+      "Cambridge Faculty of Philosophy"
+    ],
+    "expected": true
+  },
+  {
+    "keyword": "history",
+    "evidence_colleges": [
+      "Harvard Department of History",
+      "Yale Department of History",
+      "Princeton Department of History",
+      "Stanford Department of History"
+    ],
+    "expected": true
+  },
+  {
+    "keyword": "anthropology",
+    "evidence_colleges": [
+      "Harvard Department of Anthropology",
+      "Chicago Department of Anthropology",
+      "Stanford Department of Anthropology",
+      "UC Berkeley Department of Anthropology"
+    ],
+    "expected": true
+  },
+  {
+    "keyword": "literature",
+    "evidence_colleges": [
+      "Harvard Department of English and American Literature",
+      "Yale Department of Comparative Literature",
+      "Princeton Department of English",
+      "Stanford Department of English"
+    ],
+    "expected": true
+  },
+  {
+    "keyword": "music",
+    "evidence_colleges": [
+      "Juilliard School",
+      "Harvard Department of Music",
+      "Yale School of Music",
+      "MIT Music and Theater Arts"
+    ],
+    "expected": true
+  },
+  {
+    "keyword": "neuroscience",
+    "evidence_colleges": [
+      "Harvard Department of Neurobiology",
+      "MIT Department of Brain and Cognitive Sciences",
+      "Stanford Neurosciences Institute",
+      "Johns Hopkins Neuroscience"
+    ],
+    "expected": true
+  },
+  {
+    "keyword": "linguistics",
+    "evidence_colleges": [
+      "MIT Department of Linguistics",
+      "Harvard Department of Linguistics",
+      "Stanford Department of Linguistics",
+      "UC Berkeley Department of Linguistics"
+    ],
+    "expected": true
+  },
+  {
+    "keyword": "classics",
+    "evidence_colleges": [
+      "Harvard Department of the Classics",
+      "Oxford Faculty of Classics",
+      "Princeton Department of Classics",
+      "Cambridge Faculty of Classics"
+    ],
+    "expected": true
+  },
+  {
+    "keyword": "astronomy",
+    "evidence_colleges": [
+      "Harvard Department of Astronomy",
+      "Caltech Division of Physics, Mathematics and Astronomy",
+      "Princeton Department of Astrophysical Sciences",
+      "UC Berkeley Department of Astronomy"
+    ],
+    "expected": true
+  },
+  {
+    "keyword": "statistics",
+    "evidence_colleges": [
+      "Stanford Department of Statistics",
+      "Harvard Department of Statistics",
+      "UC Berkeley Department of Statistics",
+      "Carnegie Mellon Department of Statistics"
+    ],
+    "expected": true
+  },
+  {
+    "keyword": "ecology",
+    "evidence_colleges": [
+      "Yale School of Forestry & Environmental Studies",
+      "UC Berkeley Department of Environmental Science",
+      "Stanford Department of Biology - Ecology",
+      "Princeton Department of Ecology and Evolutionary Biology"
+    ],
+    "expected": true
+  },
+  {
+    "keyword": "environment",
+    "evidence_colleges": [
+      "Yale School of the Environment",
+      "Duke Nicholas School of the Environment",
+      "Stanford Woods Institute for the Environment",
+      "Harvard Environmental Science and Engineering"
+    ],
+    "expected": true
+  },
+  {
+    "keyword": "management",
+    "evidence_colleges": [
+      "MIT Sloan School of Management",
+      "Kellogg School of Management",
+      "Stanford Graduate School of Business",
+      "Harvard Business School"
+    ],
+    "expected": true
+  },
+  {
+    "keyword": "epidemiology",
+    "evidence_colleges": [
+      "Johns Hopkins Bloomberg School of Public Health",
+      "Harvard T.H. Chan School of Public Health",
+      "London School of Hygiene & Tropical Medicine",
+      "Yale School of Public Health"
+    ],
+    "expected": true
+  },
+  {
+    "keyword": "pathology",
+    "evidence_colleges": [
+      "Harvard Medical School - Department of Pathology",
+      "Johns Hopkins Department of Pathology",
+      "Stanford Department of Pathology",
+      "Yale Department of Pathology"
+    ],
+    "expected": true
+  },
+  {
+    "keyword": "psychiatry",
+    "evidence_colleges": [
+      "Harvard Medical School - Department of Psychiatry",
+      "Johns Hopkins Department of Psychiatry",
+      "Stanford Department of Psychiatry",
+      "Yale Department of Psychiatry"
+    ],
+    "expected": true
+  },
+  {
+    "keyword": "biochemistry",
+    "evidence_colleges": [
+      "Harvard Department of Molecular and Cellular Biology",
+      "MIT Department of Biology",
+      "Stanford Department of Biochemistry",
+      "UC Berkeley Department of Molecular and Cell Biology"
+    ],
+    "expected": true
+  },
+  {
+    "keyword": "media",
+    "evidence_colleges": [
+      "MIT Media Lab",
+      "USC Annenberg School for Communication",
+      "Northwestern Medill School",
+      "Columbia Journalism School"
+    ],
+    "expected": true
+  },
+  {
+    "keyword": "economics",
+    "evidence_colleges": [
+      "Yale University - Economics",
+      "University of Chicago - Economics, Kenneth C. Griffin Department of",
+      "MIT Department of Economics",
+      "Harvard Department of Economics",
+      "London School of Economics",
+      "UC Berkeley Department of Economics"
+    ],
+    "expected": true
+  },
+  {
+    "keyword": "genetics",
+    "evidence_colleges": [
+      "Yale University - Genetics",
+      "University of Chicago - Genetics, Genomics, and Systems Biology",
+      "Harvard Department of Genetics",
+      "Stanford Department of Genetics"
+    ],
+    "expected": false
+  },
+  {
+    "keyword": "surgery",
+    "evidence_colleges": [
+      "Yale University - Surgery",
+      "University of Chicago - Surgery, Department of",
+      "Johns Hopkins Department of Surgery",
+      "Harvard Medical School - Surgery"
+    ],
+    "expected": false
+  },
+  {
+    "keyword": "pediatrics",
+    "evidence_colleges": [
+      "University of Chicago - Pediatrics",
+      "Yale University - Pediatrics",
+      "Harvard Medical School - Pediatrics",
+      "Johns Hopkins - Pediatrics"
+    ],
+    "expected": false
+  },
+  {
+    "keyword": "neurology",
+    "evidence_colleges": [
+      "Harvard Medical School - Neurology",
+      "Johns Hopkins - Neurology",
+      "Mayo Clinic - Neurology",
+      "UCLA - Neurology"
+    ],
+    "expected": false
+  },
+  {
+    "keyword": "radiology",
+    "evidence_colleges": [
+      "Harvard Medical School - Radiology",
+      "Johns Hopkins - Radiology",
+      "Stanford - Radiology",
+      "Mayo Clinic - Radiology"
+    ],
+    "expected": false
+  },
+  {
+    "keyword": "ophthalmology",
+    "evidence_colleges": [
+      "Johns Hopkins Wilmer Eye Institute",
+      "Harvard Medical School - Ophthalmology",
+      "UCLA Jules Stein Eye Institute",
+      "UCSF - Ophthalmology"
+    ],
+    "expected": false
+  },
+  {
+    "keyword": "gynecology",
+    "evidence_colleges": [
+      "Johns Hopkins - Gynecology and Obstetrics",
+      "Harvard Medical School - Obstetrics and Gynecology",
+      "Yale - Obstetrics, Gynecology & Reproductive Sciences",
+      "Stanford - Obstetrics and Gynecology"
+    ],
+    "expected": false
+  },
+  {
+    "keyword": "obstetrics",
+    "evidence_colleges": [
+      "Johns Hopkins - Gynecology and Obstetrics",
+      "Harvard Medical School - Obstetrics and Gynecology",
+      "Yale - Obstetrics, Gynecology & Reproductive Sciences",
+      "Stanford - Obstetrics and Gynecology"
+    ],
+    "expected": false
+  },
+  {
+    "keyword": "microbiology",
+    "evidence_colleges": [
+      "Harvard Medical School - Microbiology",
+      "Stanford - Microbiology and Immunology",
+      "Yale - Microbial Pathogenesis",
+      "UC Berkeley - Plant and Microbial Biology"
+    ],
+    "expected": false
+  },
+  {
+    "keyword": "neurobiology",
+    "evidence_colleges": [
+      "Harvard Department of Neurobiology",
+      "Yale - Neuroscience",
+      "Stanford - Neurobiology",
+      "UC San Diego - Neurobiology"
+    ],
+    "expected": true
+  },
+  {
+    "keyword": "biostatistics",
+    "evidence_colleges": [
+      "Harvard T.H. Chan School - Biostatistics",
+      "Johns Hopkins - Biostatistics",
+      "University of Washington - Biostatistics",
+      "UC Berkeley - Biostatistics"
+    ],
+    "expected": false
+  },
+  {
+    "keyword": "race",
+    "evidence_colleges": [
+      "African American Studies Department",
+      "Center for Race and Ethnicity",
+      "Institute for Research on Race and Public Policy"
+    ],
+    "expected": false
+  },
+  {
+    "keyword": "literatures",
+    "evidence_colleges": [
+      "Department of Romance Languages and Literatures",
+      "Germanic Languages and Literatures",
+      "Slavic Languages and Literatures"
+    ],
+    "expected": false
+  },
+  {
+    "keyword": "computing",
+    "evidence_colleges": [
+      "MIT Computer Science and Artificial Intelligence Laboratory",
+      "Stanford Department of Computer Science",
+      "Carnegie Mellon School of Computer Science",
+      "UC Berkeley EECS",
+      "University of Illinois Computer Science",
+      "Georgia Tech College of Computing"
+    ],
+    "expected": true
+  },
+  {
+    "keyword": "geography",
+    "evidence_colleges": [
+      "UCLA Department of Geography",
+      "UC Berkeley Department of Geography",
+      "University of Wisconsin-Madison Geography",
+      "Penn State Department of Geography",
+      "University of British Columbia Geography",
+      "National University of Singapore Geography"
+    ],
+    "expected": true
+  },
+  {
+    "keyword": "education",
+    "evidence_colleges": [
+      "Harvard Graduate School of Education",
+      "Stanford Graduate School of Education",
+      "Teachers College, Columbia University",
+      "UC Berkeley School of Education",
+      "University of Michigan School of Education",
+      "Vanderbilt Peabody College of Education"
+    ],
+    "expected": true
+  },
+  {
+    "keyword": "architecture",
+    "evidence_colleges": [
+      "MIT Department of Architecture",
+      "Harvard Graduate School of Design",
+      "Yale School of Architecture",
+      "UC Berkeley College of Environmental Design",
+      "Cornell Architecture",
+      "Rice School of Architecture"
+    ],
+    "expected": true
+  },
+  {
+    "keyword": "agriculture",
+    "evidence_colleges": [
+      "UC Davis College of Agricultural Sciences",
+      "Cornell College of Agriculture and Life Sciences",
+      "Iowa State College of Agriculture",
+      "Texas A&M College of Agriculture",
+      "Purdue College of Agriculture",
+      "University of Illinois College of ACES"
+    ],
+    "expected": true
+  },
+  {
+    "keyword": "art",
+    "evidence_colleges": [
+      "Rhode Island School of Design",
+      "School of the Art Institute of Chicago",
+      "Parsons School of Design",
+      "California Institute of the Arts",
+      "Pratt Institute",
+      "Maryland Institute College of Art"
+    ],
+    "expected": true
+  },
+  {
+    "keyword": "cardiology",
+    "evidence_colleges": [
+      "Mayo Clinic Cardiovascular Medicine",
+      "Cleveland Clinic Heart Institute",
+      "Johns Hopkins Cardiology",
+      "Mount Sinai Cardiology"
+    ],
+    "expected": false
+  },
+  {
+    "keyword": "immunology",
+    "evidence_colleges": [
+      "Harvard Immunology Program",
+      "Stanford Immunology",
+      "Yale Immunobiology",
+      "UCSF Immunology"
+    ],
+    "expected": false
+  },
+  {
+    "keyword": "dermatology",
+    "evidence_colleges": [
+      "Harvard Dermatology",
+      "Mayo Clinic Dermatology",
+      "UCSF Dermatology",
+      "NYU Dermatology"
+    ],
+    "expected": false
+  },
+  {
+    "keyword": "paleontology",
+    "evidence_colleges": [
+      "UC Berkeley Museum of Paleontology",
+      "Yale Peabody Museum",
+      "University of Chicago Paleontology",
+      "University of Michigan Paleontology"
+    ],
+    "expected": false
+  },
+  {
+    "keyword": "criminology",
+    "evidence_colleges": [
+      "University of Maryland Criminology",
+      "University of Cincinnati Criminal Justice",
+      "Florida State Criminology",
+      "Penn State Criminology"
+    ],
+    "expected": false
+  },
+  {
+    "keyword": "nursing",
+    "evidence_colleges": [
+      "Johns Hopkins School of Nursing",
+      "University of Pennsylvania School of Nursing",
+      "Duke University School of Nursing",
+      "UCSF School of Nursing",
+      "University of Washington School of Nursing",
+      "Karolinska Institute Department of Nursing"
+    ],
+    "expected": true
+  },
+  {
+    "keyword": "journalism",
+    "evidence_colleges": [
+      "Columbia Journalism School",
+      "Northwestern Medill School of Journalism",
+      "University of Missouri School of Journalism",
+      "Arizona State Walter Cronkite School",
+      "City University London Journalism",
+      "Sciences Po Paris School of Journalism"
+    ],
+    "expected": true
+  },
+  {
+    "keyword": "dentistry",
+    "evidence_colleges": [
+      "Harvard School of Dental Medicine",
+      "UCLA School of Dentistry",
+      "University of Michigan School of Dentistry",
+      "Kings College London Dental Institute",
+      "Tokyo Medical and Dental University",
+      "University of S\u00e3o Paulo School of Dentistry"
+    ],
+    "expected": true
+  },
+  {
+    "keyword": "pharmacy",
+    "evidence_colleges": [
+      "UCSF School of Pharmacy",
+      "University of North Carolina Eshelman School of Pharmacy",
+      "University of Michigan College of Pharmacy",
+      "UCL School of Pharmacy",
+      "University of Toronto Faculty of Pharmacy",
+      "Monash University Faculty of Pharmacy"
+    ],
+    "expected": true
+  },
+  {
+    "keyword": "theology",
+    "evidence_colleges": [
+      "Harvard Divinity School",
+      "Yale Divinity School",
+      "Duke Divinity School",
+      "Oxford Faculty of Theology",
+      "University of T\u00fcbingen Faculty of Catholic Theology",
+      "Hebrew University Faculty of Humanities - Theology"
+    ],
+    "expected": true
+  },
+  {
+    "keyword": "forestry",
+    "evidence_colleges": [
+      "Yale School of Forestry & Environmental Studies",
+      "Oregon State College of Forestry",
+      "University of British Columbia Faculty of Forestry",
+      "Swedish University of Agricultural Sciences - Forest Sciences",
+      "University of Helsinki Department of Forest Sciences",
+      "Australian National University Fenner School - Forestry"
+    ],
+    "expected": true
+  },
+  {
+    "keyword": "orthodontics",
+    "evidence_colleges": [
+      "Harvard Orthodontics Program",
+      "UCLA Orthodontics Residency",
+      "University of Pennsylvania Orthodontics",
+      "Kings College London Orthodontics"
+    ],
+    "expected": false
+  },
+  {
+    "keyword": "hematology",
+    "evidence_colleges": [
+      "Harvard Hematology Division",
+      "Johns Hopkins Hematology",
+      "Mayo Clinic Hematology",
+      "MD Anderson Hematology"
+    ],
+    "expected": false
+  },
+  {
+    "keyword": "virology",
+    "evidence_colleges": [
+      "Harvard Virology Program",
+      "Yale Virology Section",
+      "Institut Pasteur Virology",
+      "CDC Division of Viral Diseases"
+    ],
+    "expected": false
+  },
+  {
+    "keyword": "acoustics",
+    "evidence_colleges": [
+      "MIT Acoustics Lab",
+      "Penn State Graduate Program in Acoustics",
+      "Technical University of Denmark Acoustic Technology",
+      "University of Salford Acoustics Research Centre"
+    ],
+    "expected": false
+  },
+  {
+    "keyword": "photonics",
+    "evidence_colleges": [
+      "MIT Photonics Center",
+      "University of Rochester Institute of Optics",
+      "EPFL Photonics Laboratory",
+      "University of Southampton Optoelectronics Research Centre"
+    ],
+    "expected": false
+  },
+  {
+    "keyword": "robotics",
+    "evidence_colleges": [
+      "MIT CSAIL Robotics",
+      "Carnegie Mellon Robotics Institute",
+      "Stanford Artificial Intelligence Laboratory",
+      "ETH Zurich Autonomous Systems Lab"
+    ],
+    "expected": false
+  },
+  {
+    "keyword": "sciences",
+    "evidence_colleges": [
+      "Indian Institute of Science",
+      "Chinese Academy of Sciences",
+      "Max Planck Institutes",
+      "Australian Academy of Science",
+      "Royal Society London",
+      "National Academy of Sciences USA"
+    ],
+    "expected": true
+  },
+  {
+    "keyword": "technology",
+    "evidence_colleges": [
+      "Indian Institutes of Technology",
+      "Technische Universit\u00e4t M\u00fcnchen",
+      "\u00c9cole Polytechnique F\u00e9d\u00e9rale de Lausanne",
+      "Korea Advanced Institute of Science and Technology",
+      "Nanyang Technological University",
+      "Delft University of Technology"
+    ],
+    "expected": true
+  },
+  {
+    "keyword": "informatics",
+    "evidence_colleges": [
+      "Indiana University School of Informatics",
+      "UC Irvine Donald Bren School of Information",
+      "University of Washington Information School",
+      "University of Edinburgh School of Informatics",
+      "Technical University of Munich Informatics",
+      "National University of Singapore School of Computing"
+    ],
+    "expected": true
+  },
+  {
+    "keyword": "sustainability",
+    "evidence_colleges": [
+      "Arizona State School of Sustainability",
+      "Columbia Climate School",
+      "Stanford Doerr School of Sustainability",
+      "University of Tokyo Institute for Future Initiatives",
+      "ETH Zurich Environmental Systems Science",
+      "Lund University Centre for Sustainability Studies"
+    ],
+    "expected": true
+  },
+  {
+    "keyword": "policy",
+    "evidence_colleges": [
+      "Harvard Kennedy School",
+      "Princeton School of Public and International Affairs",
+      "Georgetown McCourt School of Public Policy",
+      "London School of Economics Public Policy",
+      "Lee Kuan Yew School of Public Policy Singapore",
+      "Australian National University Crawford School"
+    ],
+    "expected": true
+  },
+  {
+    "keyword": "topology",
+    "evidence_colleges": [
+      "MIT Topology Seminar",
+      "Princeton Algebraic Topology Group",
+      "University of Chicago Topology",
+      "Oxford Topology Research Group"
+    ],
+    "expected": false
+  },
+  {
+    "keyword": "geophysics",
+    "evidence_colleges": [
+      "Stanford Geophysics Department",
+      "MIT Earth Resources Laboratory",
+      "Colorado School of Mines Geophysics",
+      "University of Tokyo Earthquake Research Institute"
+    ],
+    "expected": false
+  },
+  {
+    "keyword": "enzymology",
+    "evidence_colleges": [
+      "Harvard Enzyme Chemistry Lab",
+      "Stanford Biochemistry - Enzymology",
+      "Max Planck Institute for Biophysical Chemistry",
+      "Cambridge Department of Biochemistry"
+    ],
+    "expected": false
+  },
+  {
+    "keyword": "econometrics",
+    "evidence_colleges": [
+      "MIT Econometrics Laboratory",
+      "Chicago Booth Econometrics",
+      "LSE Econometrics Programme",
+      "Yale Cowles Foundation"
+    ],
+    "expected": false
+  },
+  {
+    "keyword": "phonetics",
+    "evidence_colleges": [
+      "MIT Phonetics Laboratory",
+      "UCLA Phonetics Lab",
+      "University of Edinburgh Phonetics",
+      "University College London Speech Sciences"
+    ],
+    "expected": false
+  },
+  {
+    "keyword": "biology",
+    "evidence_colleges": [
+      "Santa Monica College Life Sciences",
+      "Northern Virginia Community College Biology",
+      "Miami Dade College Biology Department",
+      "Williams College Biology",
+      "Swarthmore Biology Department",
+      "Amherst College Biology"
+    ],
+    "expected": true
+  },
+  {
+    "keyword": "english",
+    "evidence_colleges": [
+      "Community College of Philadelphia English",
+      "Austin Community College English Department",
+      "Oberlin College English",
+      "Pomona College English Department",
+      "Wellesley English Department",
+      "Davidson College English"
+    ],
+    "expected": true
+  },
+  {
+    "keyword": "theater",
+    "evidence_colleges": [
+      "Juilliard Drama Division",
+      "Yale School of Drama",
+      "NYU Tisch School of the Arts",
+      "Royal Academy of Dramatic Art London",
+      "Moscow Art Theatre School",
+      "National Institute of Dramatic Art Sydney"
+    ],
+    "expected": true
+  },
+  {
+    "keyword": "dance",
+    "evidence_colleges": [
+      "Juilliard Dance Division",
+      "NYU Tisch Dance",
+      "Royal Ballet School",
+      "Paris Opera Ballet School",
+      "Vaganova Academy",
+      "Beijing Dance Academy"
+    ],
+    "expected": true
+  },
+  {
+    "keyword": "endocrinology",
+    "evidence_colleges": [
+      "Mayo Clinic Endocrinology",
+      "Johns Hopkins Endocrinology",
+      "Harvard Medical School Endocrine Unit",
+      "UCSF Diabetes and Endocrinology"
+    ],
+    "expected": false
+  },
+  {
+    "keyword": "spectroscopy",
+    "evidence_colleges": [
+      "MIT Spectroscopy Laboratory",
+      "Stanford Magnetic Resonance Laboratory",
+      "ETH NMR Spectroscopy",
+      "Max Planck Institute for Chemical Physics"
+    ],
+    "expected": false
+  }
+]
