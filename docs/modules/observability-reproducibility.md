@@ -41,6 +41,79 @@ S1 Extraction Integration
 - Metadata generation prefers observability snapshots (counters, quarantine totals, provider error counts) ensuring JSON artifacts mirror the canonical registry.
 - Performance metrics are reported per batch to enable throughput monitoring without bespoke timers in callers.
 
+## Downstream Observability Adapter (S2 Reference)
+
+Purpose
+- Provide a copy-paste-ready integration contract any processor can follow when wiring into the observability stack.
+- S2 frequency filtering acts as the reference implementation: counters, evidence, operations, and manifests are all powered by the shared adapter.
+
+Standard Pattern
+- Accept `observability: ObservabilityContext | None` in constructors and store it on the processor.
+- Wrap processor execution in `with observability.phase("<Phase>") as phase:` and fall back to `contextlib.nullcontext()` when observability is disabled.
+- Replace ad-hoc counters with registry updates (`phase.increment("candidates_in")`, `phase.increment("kept")`, etc.).
+- Emit evidence through `phase.evidence(...)` for both positive and negative outcomes using JSON-safe payloads (candidate summaries, rationale, thresholds).
+- Record performance via `phase.performance({...})` so throughput and histogram data lands in the manifest without custom timers.
+- Capture lifecycle log entries with `phase.log_operation(operation="start"|"complete"|"failed", payload=...)` and bubble exceptions after logging failures.
+- When thresholds or seeds exist, register them once via `observability.register_threshold("Phase.key", serialized_threshold)` and `observability.register_seed("Phase.key", value)` before processing begins.
+- Leave legacy stats in place for compatibility, but reconcile them with the observability snapshot so legacy consumers see aligned values.
+
+Integration Hooks Reference
+- **Constructor**: `processor = Processor(..., observability=observability_context)`
+- **Phase context**: `with observability.phase("S2") as phase_handle:`
+- **Counters**: `phase_handle.increment("candidates_in", total_inputs)` and `phase_handle.increment("kept")` per successful decision.
+- **Evidence**: `phase_handle.evidence(category="frequency_filtering", outcome="kept", payload={...})`
+- **Quarantine**: `phase_handle.quarantine(reason="processing_error", payload={...})` for deferred items.
+- **Performance**: `phase_handle.performance({"elapsed_seconds": elapsed, ...})`
+- **Operations**: `phase_handle.log_operation(operation="frequency_aggregation_complete", payload=metrics)`
+- **Threshold registration**: `observability.register_threshold("S2.level_2", {...})`
+- **Snapshot reuse**: call `observability.snapshot()` after processing to hydrate metadata (`stats`, `observability_checksum`, evidence samples, quarantine summaries).
+
+Rollout Checklist (Remaining Processors)
+1. **Validation Processor (S3)**
+   - Counters: `checked`, `rule_failed`, `web_failed`, `llm_failed`, `passed_all`
+   - Evidence: emit success/failure payloads for each gate; quarantine undecidable cases
+   - Performance: record validator latency and throughput per batch
+2. **Deduplication Processor**
+   - Counters: `pairs_compared`, `edges_kept`, `components`, `merges_applied`
+   - Evidence: sample merged pairs with similarity scores; log discarded edges
+   - Performance: track union-find iterations and merge latency
+3. **Disambiguation Processor**
+   - Counters: `collisions_detected`, `splits_made`, `deferred`
+   - Evidence: capture representative collision resolutions and deferred items
+   - Quarantine: park unresolved collisions with structured payloads
+4. **Hierarchy Assembly Processor**
+   - Counters: `nodes_in`, `nodes_kept`, `orphans`, `violations`, `edges_built`
+   - Evidence: record sampled promotions and constraint violations
+   - Performance: log DAG construction timings, including validation retries
+5. **Web Mining Processor (S0)**
+   - Counters: `pages_seen`, `pages_failed`, `blocks_total`, `blocks_kept`, `by_language`
+   - Evidence: sample successful scrapes and blocked responses categorized by language
+   - Quarantine: store blocked URLs with HTTP diagnostics for replay
+
+Testing Requirements
+- Unit coverage must assert counter deltas, evidence capture, and phase stack hygiene (`registry.current_phase() is None`).
+- Integration suites should drive end-to-end flows (Phase Manager → processor → manifest) and confirm metadata includes counters, evidence, operations, thresholds, and checksums.
+- Determinism tests must compare observability snapshots (excluding timestamps) for identical inputs and seeds.
+- Error-path tests should verify failure operations and quarantines are emitted without breaking primary processing.
+- Reference tests: `tests/test_s2_frequency_filtering.py` (unit contract) and `tests/test_s2_observability_integration.py` (pipeline/manifest contract) illustrate the expected structure.
+
+Examples
+- S2 reference payload (`tests/test_s2_observability_integration.py`) demonstrates how metadata now embeds `observability.counters.kept` and evidence samples.
+- Adapter snippet:
+  ```python
+  with observability.phase("S2") as phase:
+      result = aggregator.aggregate(items)
+      for decision in result.kept:
+          phase.increment("kept")
+          phase.evidence(
+              category="frequency_filtering",
+              outcome="kept",
+              payload=_decision_evidence_payload(decision),
+          )
+      phase.performance({"candidates_processed": len(items), "elapsed_seconds": elapsed})
+  ```
+
+
 Testing & Tooling
 - Unit tests cover counter registry invariants, ObservabilityContext behaviour, PhaseManager orchestration, and S1 pipeline integrations with success and failure scenarios.
 - New test suites validate deterministic snapshots, evidence sampling, quarantine reporting, and manifest export structure.

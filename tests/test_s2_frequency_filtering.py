@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from taxonomy.config.policies import (
     FrequencyFilteringPolicy,
     InstitutionPolicy,
@@ -9,12 +11,15 @@ from taxonomy.config.policies import (
     LevelThresholds,
     NearDuplicateDedupPolicy,
 )
+from taxonomy.config.settings import Settings
 from taxonomy.entities.core import Candidate, SupportStats
+from taxonomy.observability import ObservabilityContext
 from taxonomy.pipeline.s2_frequency_filtering.aggregator import (
     CandidateAggregator,
     CandidateEvidence,
 )
 from taxonomy.pipeline.s2_frequency_filtering.institution_resolver import InstitutionResolver
+from taxonomy.pipeline.s2_frequency_filtering.processor import S2Processor
 
 
 def _thresholds() -> LevelThresholds:
@@ -35,6 +40,41 @@ def _candidate(level: int, label: str, normalized: str, parents: list[str], coun
         aliases=[label],
         support=SupportStats(records=count, institutions=1, count=count),
     )
+
+
+def _sample_evidence_bundle() -> list[CandidateEvidence]:
+    """Create a mixture of passing and failing S2 inputs for testing."""
+
+    resolver_policy = InstitutionPolicy(canonical_mappings={}, campus_vs_system="prefer-campus")
+    resolver = InstitutionResolver(policy=resolver_policy)
+    aggregator = CandidateAggregator(thresholds=_thresholds(), resolver=resolver)
+
+    keep_primary = _candidate(2, "Computer Vision", "computer vision", ["ai"], count=2)
+    keep_alias = _candidate(2, "Computer Vision", "computer vision", ["AI"], count=1)
+    drop_candidate = _candidate(2, "Quantum Vision", "quantum vision", ["ai"], count=1)
+
+    evidence = [
+        CandidateEvidence(candidate=keep_primary, institutions={"MIT"}, record_fingerprints={"rec-1"}),
+        CandidateEvidence(candidate=keep_alias, institutions={"Stanford"}, record_fingerprints={"rec-2"}),
+        CandidateEvidence(candidate=drop_candidate, institutions={"OnlyOne"}, record_fingerprints={"rec-3"}),
+    ]
+    result = aggregator.aggregate(evidence)
+    # ensure fixture provides expected pass/fail breakdown for downstream assertions
+    assert len(result.kept) == 1
+    assert len(result.dropped) == 1
+    return evidence
+
+
+@pytest.fixture
+def s2_observability_context() -> ObservabilityContext:
+    settings = Settings()
+    obs_policy = settings.policies.observability.model_copy(
+        update={
+            "evidence_sampling_rate": 1.0,
+            "max_evidence_samples_per_phase": 50,
+        }
+    )
+    return ObservabilityContext(run_id="s2-test", policy=obs_policy)
 
 
 def test_institution_resolver_normalizes_variants() -> None:
@@ -177,3 +217,54 @@ def test_near_duplicate_records_collapsed_by_policy() -> None:
     kept = result.kept[0]
     assert kept.candidate.support.records == 1
     assert len(kept.record_fingerprints) == 1
+
+
+def test_s2_processor_updates_observability_counters(s2_observability_context: ObservabilityContext) -> None:
+    resolver = InstitutionResolver(policy=InstitutionPolicy(canonical_mappings={}, campus_vs_system="prefer-campus"))
+    aggregator = CandidateAggregator(thresholds=_thresholds(), resolver=resolver)
+    processor = S2Processor(aggregator=aggregator, observability=s2_observability_context)
+
+    evidence = _sample_evidence_bundle()
+    result = processor.process(evidence)
+
+    snapshot = s2_observability_context.snapshot()
+    counters = snapshot.counters["S2"]
+    assert counters["candidates_in"] == len(evidence)
+    assert counters["kept"] == 1
+    assert counters["dropped_insufficient_support"] == 1
+    assert result.stats["kept"] == 1
+    assert result.stats["dropped"] == 1
+    assert result.stats["observability_checksum"] == snapshot.checksum
+    assert s2_observability_context.registry.current_phase() is None
+
+
+def test_s2_processor_records_evidence_and_performance(s2_observability_context: ObservabilityContext) -> None:
+    resolver = InstitutionResolver(policy=InstitutionPolicy(canonical_mappings={}, campus_vs_system="prefer-campus"))
+    aggregator = CandidateAggregator(thresholds=_thresholds(), resolver=resolver)
+    processor = S2Processor(aggregator=aggregator, observability=s2_observability_context)
+
+    evidence = _sample_evidence_bundle()
+    processor.process(evidence)
+
+    snapshot = s2_observability_context.snapshot()
+    samples = snapshot.evidence.get("samples", {}).get("S2", [])
+    outcomes = {sample.get("outcome") for sample in samples}
+    assert "kept" in outcomes
+    assert "dropped_insufficient_support" in outcomes
+
+    performance = snapshot.performance.get("S2", {})
+    assert performance.get("candidates_processed") == len(evidence)
+    assert "elapsed_seconds" in performance
+
+
+def test_s2_processor_maintains_stats_without_observability() -> None:
+    resolver = InstitutionResolver(policy=InstitutionPolicy(canonical_mappings={}, campus_vs_system="prefer-campus"))
+    aggregator = CandidateAggregator(thresholds=_thresholds(), resolver=resolver)
+    processor = S2Processor(aggregator=aggregator)
+
+    evidence = _sample_evidence_bundle()
+    result = processor.process(evidence)
+
+    assert result.stats["kept"] == 1
+    assert result.stats["dropped"] == 1
+    assert "observability_checksum" not in result.stats

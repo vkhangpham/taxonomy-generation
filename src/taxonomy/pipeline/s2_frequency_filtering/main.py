@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Iterable
 
 from taxonomy.config.settings import Settings, get_settings
+from taxonomy.observability import ObservabilityContext
 from taxonomy.utils.helpers import ensure_directory
 from taxonomy.utils.logging import get_logger, logging_context
 
@@ -31,8 +32,14 @@ def filter_by_frequency(
     dropped_output_path: str | Path | None = None,
     metadata_path: str | Path | None = None,
     settings: Settings | None = None,
+    observability: ObservabilityContext | None = None,
 ) -> FrequencyAggregationResult:
-    """Run S2 frequency filtering end-to-end and write streaming outputs."""
+    """Run S2 frequency filtering end-to-end and write streaming outputs.
+
+    When ``observability`` is provided the processor emits counters, evidence,
+    and performance metrics into the shared :class:`ObservabilityContext` and
+    enriches the generated metadata with the resulting snapshot.
+    """
 
     cfg = settings or get_settings()
     log = get_logger(module=__name__)
@@ -43,7 +50,12 @@ def filter_by_frequency(
         resolver=resolver,
         frequency_policy=cfg.policies.frequency_filtering,
     )
-    processor = S2Processor(aggregator=aggregator)
+    processor = S2Processor(aggregator=aggregator, observability=observability)
+
+    threshold_decisions = _threshold_metadata(cfg)
+    if observability is not None:
+        for name, payload in threshold_decisions.items():
+            observability.register_threshold(f"S2.{name}", payload)
 
     evidence_stream: Iterable[CandidateEvidence] = load_candidates(
         candidates_path,
@@ -58,12 +70,45 @@ def filter_by_frequency(
     dropped_path = write_dropped_candidates(result.dropped, dropped_path)
 
     metadata_destination = metadata_path or Path(output_path).with_suffix(".metadata.json")
-    threshold_decisions = _threshold_metadata(cfg)
     config_used = {
         "policy_version": cfg.policies.policy_version,
         "level": level,
     }
-    metadata = generate_s2_metadata(result.stats, config_used, threshold_decisions)
+    processing_stats = dict(result.stats)
+
+    observability_payload: dict[str, object] | None = None
+    if observability is not None:
+        snapshot_data = observability.export()
+        counters = snapshot_data.get("counters", {}).get("S2", {})
+        for counter in ("candidates_in", "kept", "dropped_insufficient_support"):
+            if counter in counters:
+                processing_stats[counter] = int(counters[counter])
+        observability_payload = {
+            "phase": "S2",
+            "checksum": snapshot_data.get("checksum"),
+            "captured_at": snapshot_data.get("captured_at"),
+            "snapshot_timestamp": snapshot_data.get("snapshot_timestamp"),
+            "counters": counters,
+            "performance": snapshot_data.get("performance", {}).get("S2", {}),
+            "operations": [
+                entry
+                for entry in snapshot_data.get("operations", [])
+                if isinstance(entry, dict) and entry.get("phase") == "S2"
+            ],
+            "evidence_samples": snapshot_data.get("evidence", {}).get("samples", {}).get("S2", []),
+            "evidence_considered": snapshot_data.get("evidence", {}).get("total_considered", {}).get("S2", 0),
+            "quarantine": snapshot_data.get("quarantine", {}),
+            "prompt_versions": snapshot_data.get("prompt_versions", {}),
+            "thresholds": snapshot_data.get("thresholds", {}),
+            "seeds": snapshot_data.get("seeds", {}),
+        }
+
+    metadata = generate_s2_metadata(
+        processing_stats,
+        config_used,
+        threshold_decisions,
+        observability=observability_payload,
+    )
     ensure_directory(Path(metadata_destination).parent)
     Path(metadata_destination).write_text(
         json.dumps(metadata, indent=2, sort_keys=True) + "\n",

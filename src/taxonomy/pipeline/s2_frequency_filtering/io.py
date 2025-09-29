@@ -108,15 +108,20 @@ def generate_s2_metadata(
     processing_stats: dict,
     config_used: dict,
     threshold_decisions: dict,
+    *,
+    observability: dict[str, object] | None = None,
 ) -> dict:
     """Generate metadata describing the S2 processing run."""
 
-    return {
+    metadata = {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "stats": dict(processing_stats),
         "thresholds": dict(threshold_decisions),
         "config": dict(config_used),
     }
+    if observability is not None:
+        metadata["observability"] = observability
+    return metadata
 
 
 def _extract_candidate_payload(payload: dict) -> dict:
