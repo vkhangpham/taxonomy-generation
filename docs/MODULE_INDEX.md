@@ -39,3 +39,43 @@ CLI
 Notes
 - All module docs should conform to `docs/DOCUMENTATION_GUIDE.md` and cross‑reference `docs/logic-spec.md`.
 - Status should be updated when behavior changes, policies bump, or interfaces drift.
+
+## Per‑Module READMEs (Quick Reference)
+
+Purpose
+- Track in‑tree `README.md` coverage for developer quick reference alongside detailed docs above.
+
+Pipeline Steps (README path → status)
+- `src/taxonomy/pipeline/s0_raw_extraction/README.md` — ❌ Missing
+- `src/taxonomy/pipeline/s1_extraction_normalization/README.md` — ❌ Missing
+- `src/taxonomy/pipeline/s2_frequency_filtering/README.md` — ❌ Missing
+- `src/taxonomy/pipeline/s3_token_verification/README.md` — ❌ Missing
+- `src/taxonomy/pipeline/deduplication/README.md` — ❌ Missing
+- `src/taxonomy/pipeline/disambiguation/README.md` — ❌ Missing
+- `src/taxonomy/pipeline/validation/README.md` — ❌ Missing
+- `src/taxonomy/pipeline/hierarchy_assembly/README.md` — ❌ Missing
+
+Orchestration & Abstractions
+- `src/taxonomy/orchestration/README.md` — ❌ Missing
+- `src/taxonomy/pipeline/README.md` — ❌ Missing
+
+Cross‑Cutting Services
+- `src/taxonomy/llm/README.md` — ❌ Missing
+- `src/taxonomy/observability/README.md` — ❌ Missing
+- `src/taxonomy/web_mining/README.md` — ❌ Missing
+- `src/taxonomy/prompt_optimization/README.md` — ❌ Missing
+
+Configuration & Policies
+- `src/taxonomy/config/README.md` — ❌ Missing
+
+Domain Entities
+- `src/taxonomy/entities/README.md` — ❌ Missing
+
+Shared Utilities
+- `src/taxonomy/utils/README.md` — ❌ Missing
+
+CLI
+- `src/taxonomy/cli/README.md` — ❌ Missing
+
+See Also
+- Full mapping with detailed doc links: `docs/MODULE_README_INVENTORY.md`.

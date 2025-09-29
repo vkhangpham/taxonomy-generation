@@ -76,3 +76,37 @@ See also
 - `docs/modules/raw-extraction.md`
 - `docs/modules/llm.md`
 
+## Per‑Module README Standards
+
+Purpose
+- Provide fast, developer‑oriented context at the package level without duplicating the detailed logic specs in `docs/modules/`.
+
+Scope & Placement
+- Each top‑level package and significant subpackage under `src/taxonomy/` should include a `README.md`.
+- READMEs live alongside code (e.g., `src/taxonomy/pipeline/s2_frequency_filtering/README.md`).
+
+When to Use
+- Use the README for quick orientation, entry points, API summaries, data contracts, configuration keys, and usage snippets.
+- Use the module spec in `docs/modules/` for full, implementation‑agnostic logic, invariants, and acceptance scenarios.
+
+Template
+- Start from `docs/README_TEMPLATE.md` and keep sections concise:
+  - Purpose (1–2 sentences)
+  - Key APIs (classes/functions)
+  - Data Contracts (inputs/outputs, error surfaces)
+  - Quick Start (minimal runnable snippet)
+  - Configuration (settings/policy keys and defaults)
+  - Dependencies (internal/external)
+  - Observability (metrics/manifest fields)
+  - Determinism & Retry (seeds, idempotency, resume semantics)
+  - See Also (link to detailed doc and related modules)
+
+Standards
+- Brevity first: prefer bullets; avoid restating algorithmic details covered in the module spec.
+- Keep examples deterministic and aligned with current policies.
+- Cross‑link both ways: README → `docs/modules/<name>.md` and that spec should link back to the README path.
+- Update READMEs when public APIs, data contracts, or configuration keys change.
+
+Tracking
+- Track README coverage in `docs/MODULE_INDEX.md` and the detailed mapping in `docs/MODULE_README_INVENTORY.md`.
+
