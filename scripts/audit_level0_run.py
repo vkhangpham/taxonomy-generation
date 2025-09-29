@@ -8,7 +8,6 @@ snapshots, and verifies that each stage honours the configured audit limit.
 from __future__ import annotations
 
 import argparse
-import json
 import logging
 import os
 from dataclasses import dataclass, field, asdict
@@ -122,7 +121,9 @@ def _load_config(path: Path) -> dict[str, Any]:
     with path.open("r", encoding="utf-8") as handle:
         loaded = yaml.safe_load(handle) or {}
     if not isinstance(loaded, dict):
-        raise ValueError(f"Audit configuration '{path}' must contain a mapping at the top level")
+        raise ValueError(
+            f"Audit configuration '{path}' must contain a mapping at the top level"
+        )
     return loaded
 
 
@@ -141,7 +142,9 @@ def _initialise_settings(config_path: Path) -> Settings:
 def _configure_logging(log_dir: Path, run_id: str, level: str) -> Path:
     ensure_directory(log_dir)
     log_path = (Path(log_dir) / f"audit_run_{run_id}.log").resolve()
-    formatter = logging.Formatter("%(asctime)s | %(levelname)s | %(name)s | %(message)s")
+    formatter = logging.Formatter(
+        "%(asctime)s | %(levelname)s | %(name)s | %(message)s"
+    )
     handler = logging.FileHandler(log_path, encoding="utf-8")
     handler.setFormatter(formatter)
     stream_handler = logging.StreamHandler()
@@ -454,27 +457,37 @@ def _build_summary(
     config_path: Path,
     settings: Settings,
     stage_results: list[StageResult],
-    observability_path: Path,
+    observability_path: Path | None,
     log_path: Path,
     started_at: str,
     completed_at: str,
     required_env: Sequence[str],
+    status: str,
+    failure: dict[str, Any] | None,
 ) -> dict[str, Any]:
-    return {
+    summary = {
         "run_id": run_id,
         "config": str(config_path.resolve()),
         "started_at": started_at,
         "completed_at": completed_at,
         "environment": settings.environment,
         "audit_mode": settings.audit_mode.enabled,
-        "audit_limit": stage_results[0].audit_limit if stage_results else DEFAULT_AUDIT_LIMIT,
+        "audit_limit": (
+            stage_results[0].audit_limit if stage_results else DEFAULT_AUDIT_LIMIT
+        ),
         "output_dir": str(Path(settings.paths.output_dir).resolve()),
         "log_file": str(log_path),
-        "observability_snapshot": str(observability_path),
+        "observability_snapshot": (
+            str(observability_path) if observability_path else None
+        ),
         "policy_version": settings.policies.policy_version,
         "required_env": list(required_env),
         "stages": [stage.to_dict() for stage in stage_results],
+        "status": status,
     }
+    if failure:
+        summary["failure"] = failure
+    return summary
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -485,115 +498,160 @@ def main(argv: Sequence[str] | None = None) -> int:
     _ensure_env_vars(args.require_env)
 
     run_root = ensure_directory(Path(settings.paths.output_dir) / run_id)
-    stage_dirs = {phase: ensure_directory(run_root / phase) for phase in ("S0", "S1", "S2", "S3")}
+    stage_dirs = {
+        phase: ensure_directory(run_root / phase) for phase in ("S0", "S1", "S2", "S3")
+    }
 
+    logger = logging.getLogger("audit")
     started_at = _timestamp()
     stage_results: list[StageResult] = []
+    observability: ObservabilityContext | None = None
+    observability_snapshot: dict[str, Any] | None = None
+    observability_path: Path | None = None
+    current_stage: str | None = None
+    failure: dict[str, Any] | None = None
+    exit_code = 0
 
-    # Stage S0 selection
-    if args.s0_mode == "excel":
-        s0_output = stage_dirs["S0"] / "source_records.jsonl"
+    try:
+        current_stage = "S0"
+        if args.s0_mode == "excel":
+            s0_output = stage_dirs["S0"] / "source_records.jsonl"
+            stage_results.append(
+                _run_s0_excel(
+                    settings=settings,
+                    output_path=s0_output,
+                    limit=args.limit,
+                )
+            )
+            s0_records_path = s0_output
+        elif args.s0_mode == "snapshots":
+            if not args.snapshots_path:
+                raise ValueError(
+                    "--snapshots-path is required when --s0-mode=snapshots"
+                )
+            s0_output = stage_dirs["S0"] / "source_records.jsonl"
+            stage_results.append(
+                _run_s0_snapshots(
+                    settings=settings,
+                    snapshots_path=args.snapshots_path,
+                    output_path=s0_output,
+                    limit=args.limit,
+                    batch_size=args.s0_batch_size,
+                )
+            )
+            s0_records_path = s0_output
+        else:
+            if not args.existing_s0_path:
+                raise ValueError("--existing-s0-path is required when --s0-mode=reuse")
+            stage_results.append(_reuse_s0(args.existing_s0_path, args.limit))
+            s0_records_path = args.existing_s0_path
+
+        observability = ObservabilityContext(
+            run_id=run_id,
+            policy=settings.policies.observability,
+        )
+
+        current_stage = "S1"
+        s1_output = stage_dirs["S1"] / "level0_candidates.jsonl"
+        s1_metadata = stage_dirs["S1"] / "level0_candidates.metadata.json"
         stage_results.append(
-            _run_s0_excel(
+            _run_s1(
                 settings=settings,
-                output_path=s0_output,
+                observability=observability,
+                source_records=s0_records_path,
+                output_path=s1_output,
+                metadata_path=s1_metadata,
+                batch_size=args.s1_batch_size,
                 limit=args.limit,
             )
         )
-        s0_records_path = s0_output
-    elif args.s0_mode == "snapshots":
-        if not args.snapshots_path:
-            raise ValueError("--snapshots-path is required when --s0-mode=snapshots")
-        s0_output = stage_dirs["S0"] / "source_records.jsonl"
+
+        current_stage = "S2"
+        s2_output = stage_dirs["S2"] / "level0_kept.jsonl"
+        s2_dropped = stage_dirs["S2"] / "level0_dropped.jsonl"
+        s2_metadata = stage_dirs["S2"] / "level0.metadata.json"
         stage_results.append(
-            _run_s0_snapshots(
+            _run_s2(
                 settings=settings,
-                snapshots_path=args.snapshots_path,
-                output_path=s0_output,
+                observability=observability,
+                candidates_path=s1_output,
+                output_path=s2_output,
+                dropped_path=s2_dropped,
+                metadata_path=s2_metadata,
                 limit=args.limit,
-                batch_size=args.s0_batch_size,
             )
         )
-        s0_records_path = s0_output
-    else:
-        if not args.existing_s0_path:
-            raise ValueError("--existing-s0-path is required when --s0-mode=reuse")
-        stage_results.append(_reuse_s0(args.existing_s0_path, args.limit))
-        s0_records_path = args.existing_s0_path
 
-    observability = ObservabilityContext(
-        run_id=run_id,
-        policy=settings.policies.observability,
-    )
-
-    # Stage S1
-    s1_output = stage_dirs["S1"] / "level0_candidates.jsonl"
-    s1_metadata = stage_dirs["S1"] / "level0_candidates.metadata.json"
-    stage_results.append(
-        _run_s1(
-            settings=settings,
-            observability=observability,
-            source_records=s0_records_path,
-            output_path=s1_output,
-            metadata_path=s1_metadata,
-            batch_size=args.s1_batch_size,
-            limit=args.limit,
+        current_stage = "S3"
+        s3_output = stage_dirs["S3"] / "level0_verified.jsonl"
+        s3_failed = stage_dirs["S3"] / "level0_failed.jsonl"
+        s3_metadata = stage_dirs["S3"] / "level0.metadata.json"
+        stage_results.append(
+            _run_s3(
+                settings=settings,
+                candidates_path=s2_output,
+                output_path=s3_output,
+                failed_path=s3_failed,
+                metadata_path=s3_metadata,
+                limit=args.limit,
+            )
         )
-    )
 
-    # Stage S2
-    s2_output = stage_dirs["S2"] / "level0_kept.jsonl"
-    s2_dropped = stage_dirs["S2"] / "level0_dropped.jsonl"
-    s2_metadata = stage_dirs["S2"] / "level0.metadata.json"
-    stage_results.append(
-        _run_s2(
-            settings=settings,
-            observability=observability,
-            candidates_path=s1_output,
-            output_path=s2_output,
-            dropped_path=s2_dropped,
-            metadata_path=s2_metadata,
-            limit=args.limit,
+        if observability:
+            observability_snapshot = observability.export()
+    except Exception as exc:  # noqa: BLE001
+        exit_code = 1
+        failure = {
+            "stage": current_stage,
+            "message": str(exc),
+            "exception_type": exc.__class__.__name__,
+        }
+        logger.exception(
+            "Audit run failed during %s", current_stage or "initialisation"
         )
-    )
+    finally:
+        if observability_snapshot is None:
+            if observability is not None:
+                try:
+                    observability_snapshot = observability.export()
+                except Exception as obs_exc:  # noqa: BLE001
+                    logger.exception("Failed to export observability snapshot")
+                    observability_snapshot = {
+                        "error": "observability_export_failed",
+                        "message": str(obs_exc),
+                    }
+            else:
+                observability_snapshot = {"error": "observability_not_available"}
 
-    # Stage S3
-    s3_output = stage_dirs["S3"] / "level0_verified.jsonl"
-    s3_failed = stage_dirs["S3"] / "level0_failed.jsonl"
-    s3_metadata = stage_dirs["S3"] / "level0.metadata.json"
-    stage_results.append(
-        _run_s3(
-            settings=settings,
-            candidates_path=s2_output,
-            output_path=s3_output,
-            failed_path=s3_failed,
-            metadata_path=s3_metadata,
-            limit=args.limit,
+        observability_path = serialize_json(
+            observability_snapshot,
+            run_root / "observability_snapshot.json",
         )
-    )
+        completed_at = _timestamp()
+        summary = _build_summary(
+            run_id=run_id,
+            config_path=args.config,
+            settings=settings,
+            stage_results=stage_results,
+            observability_path=observability_path,
+            log_path=log_path,
+            started_at=started_at,
+            completed_at=completed_at,
+            required_env=args.require_env,
+            status="failed" if failure else "success",
+            failure=failure,
+        )
+        serialize_json(summary, run_root / "audit_run_summary.json")
 
-    observability_snapshot = observability.export()
-    observability_path = serialize_json(
-        observability_snapshot,
-        run_root / "observability_snapshot.json",
-    )
-    completed_at = _timestamp()
+    if failure:
+        logger.error(
+            "Audit run failed",
+            extra={"run_id": run_id, "stage": failure.get("stage")},
+        )
+        return exit_code
 
-    summary = _build_summary(
-        run_id=run_id,
-        config_path=args.config,
-        settings=settings,
-        stage_results=stage_results,
-        observability_path=observability_path,
-        log_path=log_path,
-        started_at=started_at,
-        completed_at=completed_at,
-        required_env=args.require_env,
-    )
-    serialize_json(summary, run_root / "audit_run_summary.json")
-
-    logging.getLogger("audit").info("Audit run complete", extra={"run_id": run_id})
-    return 0
+    logger.info("Audit run complete", extra={"run_id": run_id})
+    return exit_code
 
 
 if __name__ == "__main__":
