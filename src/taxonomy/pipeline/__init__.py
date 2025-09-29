@@ -112,8 +112,7 @@ class Pipeline:
         }
 
     def _ensure_steps_index(self) -> None:
-        if len(self._steps_by_name) == len(self.steps):
-            return
+        # Rebuild unconditionally to avoid stale mappings.
         self._steps_by_name.clear()
         for step in self.steps:
             if step.name in self._steps_by_name:
@@ -121,6 +120,5 @@ class Pipeline:
                     f"Duplicate pipeline step name '{step.name}' detected while refreshing step index."
                 )
             self._steps_by_name[step.name] = step
-
 
 __all__ = ["Pipeline", "PipelineStep"]

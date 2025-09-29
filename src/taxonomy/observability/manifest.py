@@ -40,7 +40,7 @@ class ObservabilityManifest:
                 value = counters[name]
                 if isinstance(value, Mapping):
                     aggregated[phase][name] = {
-                        label: value[label] for label in stable_sorted(value)
+                        label: int(value.get(label, 0)) for label in stable_sorted(value)
                     }
                 else:
                     aggregated[phase][name] = int(value)
@@ -155,7 +155,19 @@ class ObservabilityManifest:
             for phase, metrics in sorted(snap.performance.items(), key=lambda item: item[0])
         }
         prompt_versions = dict(sorted(snap.prompt_versions.items()))
-        thresholds = dict(sorted(snap.thresholds.items()))
+        thresholds: Dict[str, Any] = {}
+        for dotted_key, value in sorted(snap.thresholds.items()):
+            cursor = thresholds
+            parts = dotted_key.split(".")
+            for idx, part in enumerate(parts):
+                if idx == len(parts) - 1:
+                    cursor[part] = value
+                else:
+                    next_node = cursor.get(part)
+                    if not isinstance(next_node, dict):
+                        next_node = {}
+                        cursor[part] = next_node
+                    cursor = next_node
         seeds = dict(sorted(snap.seeds.items()))
         return {
             "counters": counters,

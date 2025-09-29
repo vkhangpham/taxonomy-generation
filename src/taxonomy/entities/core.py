@@ -239,8 +239,9 @@ class Concept(BaseModel):
         if passed is None:
             passed_gates.pop(gate, None)
         else:
-            passed_gates[gate] = bool(passed)
-
+            if not isinstance(passed, bool):
+                raise ValueError("passed must be a bool or None")
+            passed_gates[gate] = passed
         if not passed_gates:
             self.validation_passed = None
         else:

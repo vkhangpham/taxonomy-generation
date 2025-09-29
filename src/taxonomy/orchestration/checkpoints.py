@@ -88,14 +88,16 @@ class CheckpointManager:
         true the method only reports what *would* be removed without unlinking
         files. The return value contains the list of checkpoint paths selected
         for deletion and a list of pairs describing paths that could not be
-        removed together with the associated error message.
+        inspected or removed together with the associated error message.
         """
 
+        failures: list[tuple[Path, str]] = []
         checkpoint_entries: list[tuple[Path, float]] = []
         for candidate in self.base_directory.glob("*.checkpoint.json"):
             try:
                 stat_result = candidate.stat()
             except OSError as error:
+                failures.append((candidate, str(error)))
                 _LOGGER.warning(
                     "Unable to stat checkpoint during cleanup",
                     path=str(candidate),
@@ -126,7 +128,6 @@ class CheckpointManager:
             to_remove.append(path)
 
         removed: list[Path] = []
-        failures: list[tuple[Path, str]] = []
         for path in to_remove:
             if dry_run:
                 _LOGGER.info(

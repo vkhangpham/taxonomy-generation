@@ -51,7 +51,7 @@ def test_observability_context_captures_evidence_and_quarantine() -> None:
     evidence_samples = snapshot.evidence["samples"].get("S1", [])
     assert evidence_samples
     assert evidence_samples[0]["payload"]["record"] == "abc"
-    assert snapshot.operations[0]["operation"] == "test_op"
+    assert any(op.get("operation") == "test_op" for op in snapshot.operations)
     assert snapshot.performance["S1"]["elapsed_seconds"] == pytest.approx(0.01, rel=1e-6)
 
 

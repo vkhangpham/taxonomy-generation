@@ -321,9 +321,10 @@ class ObservabilityContext:
 
     def register_seed(self, name: str, value: int) -> None:
         with self._lock:
-            copied_value = deepcopy(value)
-            self._seeds[name] = int(copied_value)
-
+            try:
+                self._seeds[name] = int(value)
+            except (TypeError, ValueError):
+                _LOGGER.warning("Ignoring invalid observability seed '%s'=%r", name, value)
     # ------------------------------------------------------------------
     # Export helpers
     # ------------------------------------------------------------------

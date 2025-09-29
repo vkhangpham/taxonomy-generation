@@ -65,16 +65,22 @@ def extract_candidates(
     snapshot_before = obs_context.snapshot() if obs_context is not None else None
     before_counters = snapshot_before.counters.get("S1", {}) if snapshot_before else {}
     before_op_sequence = 0
-    if snapshot_before and snapshot_before.operations:
-        last_operation = snapshot_before.operations[-1]
-        if isinstance(last_operation, dict):
-            before_op_sequence = int(last_operation.get("sequence", 0))
+    if snapshot_before:
+        s1_ops_before = [
+            op for op in snapshot_before.operations
+            if isinstance(op, dict) and op.get("phase") == "S1"
+        ]
+        if s1_ops_before:
+            before_op_sequence = int(s1_ops_before[-1].get("sequence", 0))
     before_quarantine_sequence = 0
     if snapshot_before:
         items_before = snapshot_before.quarantine.get("items", [])
-        if items_before:
-            before_quarantine_sequence = items_before[-1].get("sequence", 0)
-
+        s1_items_before = [
+            it for it in items_before
+            if isinstance(it, dict) and it.get("phase") == "S1"
+        ]
+        if s1_items_before:
+            before_quarantine_sequence = int(s1_items_before[-1].get("sequence", 0))
     previous_parents = list(previous_parents or [])
     if previous_parents:
         parent_index.build_index(previous_parents)
@@ -100,38 +106,23 @@ def extract_candidates(
             if resume_path is not None:
                 _write_resume_checkpoint(resume_path, processed_records, aggregated_state)
 
-    candidates = processor._materialize(aggregated_state.values())
-
-    if output_path is not None:
-        _stream_candidates(candidates, output_path)
-        if metadata_path is None:
-            metadata_path = Path(output_path).with_suffix(".metadata.json")
-        obs_for_stats = obs_context
-        snapshot_after = obs_for_stats.snapshot() if obs_for_stats is not None else None
-        if snapshot_after is not None:
-            after_counters = snapshot_after.counters.get("S1", {})
-
-            def _delta(name: str) -> int:
-                before = int(before_counters.get(name, 0))
-                after = int(after_counters.get(name, 0))
-                return max(0, after - before)
-
-            provider_errors = sum(
-                1
-                for entry in snapshot_after.operations
-                if entry.get("phase") == "S1"
-                and entry.get("operation") == "provider_error"
-                and int(entry.get("sequence", 0)) > before_op_sequence
-            )
-            quarantined = 0
-            items_after = snapshot_after.quarantine.get("items", [])
-            for item in items_after:
-                if item.get("phase") == "S1" and item.get("sequence", 0) > before_quarantine_sequence:
-                    quarantined += 1
-            stats = {
-                "records_in": _delta("records_in") or processed_records,
-                "records_processed_total": processed_records,
-                "candidates_out": _delta("candidates_out"),
+        provider_errors = sum(
+            1
+            for entry in snapshot_after.operations
+            if isinstance(entry, dict)
+            and entry.get("phase") == "S1"
+            and entry.get("operation") == "provider_error"
+            and int(entry.get("sequence", 0)) > before_op_sequence
+        )
+        quarantined = 0
+        items_after = snapshot_after.quarantine.get("items", [])
+        for item in items_after:
+            if (
+                isinstance(item, dict)
+                and item.get("phase") == "S1"
+                and int(item.get("sequence", 0)) > before_quarantine_sequence
+            ):
+                quarantined += 1
                 "invalid_json": _delta("invalid_json"),
                 "quarantined": quarantined,
                 "provider_errors": int(provider_errors),

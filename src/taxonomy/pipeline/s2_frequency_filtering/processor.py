@@ -24,11 +24,11 @@ def _decision_evidence_payload(decision: FrequencyDecision) -> dict[str, object]
     """Return a JSON-safe payload summarising a frequency decision."""
 
     candidate_payload = decision.candidate.model_dump(mode="json", exclude_none=True)
-    rationale_payload = decision.rationale.model_dump(mode="json")
+    rationale_payload = decision.rationale.model_dump(mode="json", exclude_none=True)
     return {
         "candidate": candidate_payload,
-        "institutions": list(decision.institutions),
-        "record_fingerprints": list(decision.record_fingerprints),
+        "institutions": sorted(decision.institutions),
+        "record_fingerprints": sorted(decision.record_fingerprints),
         "weight": float(decision.weight),
         "passed": bool(decision.passed),
         "rationale": rationale_payload,

@@ -114,6 +114,52 @@ class RunManifest:
             coerced[str(name)] = str(version)
         return coerced
 
+    @staticmethod
+    def _deep_update_dict(target: Dict[str, Any], incoming: Mapping[Any, Any]) -> None:
+        """Recursively merge mappings into ``target`` in place."""
+
+        for key, value in incoming.items():
+            if isinstance(value, Mapping):
+                value_dict: Dict[str, Any] = dict(value)
+                if key in target and isinstance(target.get(key), Mapping):
+                    existing = target[key]
+                    if not isinstance(existing, dict):
+                        existing = dict(existing)
+                        target[key] = existing
+                    RunManifest._deep_update_dict(existing, value_dict)
+                else:
+                    target[key] = value_dict
+            else:
+                target[key] = value
+
+    @classmethod
+    def _expand_dotted_mapping(cls, payload: Mapping[Any, Any]) -> Dict[str, Any]:
+        """Expand dotted keys into nested dictionaries for threshold payloads."""
+
+        expanded: Dict[str, Any] = {}
+        for key, raw_value in payload.items():
+            value = (
+                cls._expand_dotted_mapping(raw_value)
+                if isinstance(raw_value, Mapping)
+                else raw_value
+            )
+
+            if isinstance(key, str) and "." in key:
+                segments = [segment for segment in key.split(".") if segment]
+                if not segments:
+                    continue
+                nested: Dict[str, Any] = {}
+                cursor = nested
+                for segment in segments[:-1]:
+                    cursor = cursor.setdefault(segment, {})
+                cursor[segments[-1]] = value
+            else:
+                nested = {key: value}
+
+            cls._deep_update_dict(expanded, nested)
+
+        return expanded
+
     def _resolve_prompt_keys(
         self,
         registry: "PromptRegistry",
@@ -437,7 +483,7 @@ class RunManifest:
                     else:
                         sanitized[key] = _sanitize(raw_value)
                 return sanitized
-            if isinstance(value, list | tuple):
+            if isinstance(value, (list, tuple)):
                 return [_sanitize(item) for item in value]
             return value
 
@@ -623,10 +669,22 @@ class RunManifest:
         if prompt_versions:
             self._data.setdefault("prompt_versions", {}).update(prompt_versions)
 
-        thresholds_payload = exported.get("thresholds", {}) if isinstance(exported, Mapping) else {}
+        thresholds_payload = (
+            exported.get("thresholds", {}) if isinstance(exported, Mapping) else {}
+        )
         if isinstance(thresholds_payload, Mapping):
-            configuration.setdefault("thresholds", {}).update(dict(thresholds_payload))
-            self._thresholds.update(dict(thresholds_payload))
+            expanded_thresholds = self._expand_dotted_mapping(thresholds_payload)
+            thresholds_config = configuration.setdefault("thresholds", {})
+            if not isinstance(thresholds_config, dict):
+                thresholds_config = (
+                    dict(thresholds_config)
+                    if isinstance(thresholds_config, Mapping)
+                    else {}
+                )
+                configuration["thresholds"] = thresholds_config
+            if expanded_thresholds:
+                self._deep_update_dict(thresholds_config, expanded_thresholds)
+                self._deep_update_dict(self._thresholds, expanded_thresholds)
         elif thresholds_payload:
             _LOGGER.warning(
                 "Observability thresholds payload for run %s is not mapping-compatible; skipping integration (type=%s)",
