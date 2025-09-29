@@ -200,6 +200,8 @@ class ExtractionProcessor:
                         break
                     except ValidationError as exc:
                         self._increment_legacy("invalid_json")
+                        if phase_handle is not None:
+                            phase_handle.increment("invalid_json")
                         final_error = str(exc)
                         error_reason = "invalid_json"
                         self._log.warning(
@@ -220,7 +222,6 @@ class ExtractionProcessor:
                         if attempt >= self._max_retries:
                             payload = None
                             if phase_handle is not None:
-                                phase_handle.increment("invalid_json")
                                 phase_handle.quarantine(
                                     reason="invalid_json",
                                     item_id=record.meta.hints.get("record_id")
