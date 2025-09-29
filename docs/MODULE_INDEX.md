@@ -16,7 +16,7 @@ Pipeline Steps
 - `pipeline/hierarchy_assembly` → `docs/modules/hierarchy-assembly.md` — ✅
 
 Orchestration & Pipeline Abstractions
-- `pipeline/__init__.py` + `orchestration/` → `docs/modules/pipeline-orchestration.md` — ❌ (this PR adds)
+- `pipeline/__init__.py` + `orchestration/` → `docs/modules/pipeline-orchestration.md` — ✅
 
 Cross‑Cutting Services
 - `llm/` → `docs/modules/llm.md` — ✅
@@ -25,18 +25,17 @@ Cross‑Cutting Services
 - `prompt_optimization/` → `docs/modules/prompt-optimization.md` — ✅
 
 Configuration & Policies
-- `config/settings.py` + `config/policies/*` → `docs/modules/config-policies.md` — ❌ (this PR adds)
+- `config/settings.py` + `config/policies/*` → `docs/modules/config-policies.md` — ✅
 
 Domain Entities
-- `entities/` → `docs/modules/entities-core.md` — ❌ (this PR adds)
+- `entities/` → `docs/modules/entities-core.md` — ✅
 
 Shared Utilities
-- `utils/` → `docs/modules/utils-shared.md` — ❌ (this PR adds)
+- `utils/` → `docs/modules/utils-shared.md` — ✅
 
 CLI
-- `cli/` → `docs/modules/cli-interfaces.md` — ❌ (this PR adds)
+- `cli/` → `docs/modules/cli-interfaces.md` — ✅
 
 Notes
 - All module docs should conform to `docs/DOCUMENTATION_GUIDE.md` and cross‑reference `docs/logic-spec.md`.
 - Status should be updated when behavior changes, policies bump, or interfaces drift.
-
