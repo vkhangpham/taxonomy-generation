@@ -20,6 +20,15 @@ class ObservabilityManifest:
     # ------------------------------------------------------------------
     # Snapshot helpers
     # ------------------------------------------------------------------
+    @staticmethod
+    def _coerce_int(value: Any) -> int:
+        """Convert ``value`` to an ``int``, defaulting invalid inputs to ``0``."""
+
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return 0
+
     def snapshot(self) -> ObservabilitySnapshot:
         if self._snapshot is None:
             self._snapshot = self.context.snapshot()
@@ -40,10 +49,11 @@ class ObservabilityManifest:
                 value = counters[name]
                 if isinstance(value, Mapping):
                     aggregated[phase][name] = {
-                        label: int(value.get(label, 0)) for label in stable_sorted(value)
+                        label: self._coerce_int(value.get(label, 0))
+                        for label in stable_sorted(value)
                     }
                 else:
-                    aggregated[phase][name] = int(value)
+                    aggregated[phase][name] = self._coerce_int(value)
         return aggregated
 
     # ------------------------------------------------------------------
