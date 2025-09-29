@@ -166,6 +166,27 @@ policies:
     cost_tracking:
       token_budget_per_hour: 20000
       enabled: false
+  prompt_optimization:
+    optimization_budget: heavy
+    comprehensive_search: true
+    deploy_immediately: true
+    validation_ratio: 0.2
+    random_seed: 20250927
+    explore_all_few_shot_k: true
+    explore_temperature_variants: true
+    explore_constraint_variants: true
+    default_few_shot_k: 2
+    constraint_variant: baseline
+    json_validity_threshold: 0.995
+    schema_adherence_threshold: 1.0
+    strict_guardrail_enforcement: true
+    min_trials_for_confidence: 30
+    convergence_patience: 15
+    backup_before_deployment: true
+    validate_deployed_variant: true
+    rollback_on_failure: true
+    use_merge: true
+    reflection_model: openai/gpt-4o
   disambiguation:
     min_parent_divergence: 0.3
     min_context_overlap_threshold: 0.2

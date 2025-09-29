@@ -28,6 +28,7 @@ from .llm import (
     RepairSettings,
 )
 from .observability import CostTrackingSettings, ObservabilityPolicy, ObservabilitySettings
+from .prompt_optimization import PromptOptimizationPolicy
 from .thresholds import LevelThreshold, LevelThresholds
 from .validation import (
     EvidenceStorageSettings,
@@ -75,6 +76,9 @@ class Policies(BaseModel):
     observability: ObservabilityPolicy = Field(default_factory=ObservabilityPolicy)
     hierarchy_assembly: HierarchyAssemblyPolicy = Field(
         default_factory=HierarchyAssemblyPolicy
+    )
+    prompt_optimization: PromptOptimizationPolicy = Field(
+        default_factory=PromptOptimizationPolicy
     )
 
     @model_validator(mode="after")
@@ -200,4 +204,5 @@ __all__ = [
     "CostTrackingSettings",
     "DisambiguationPolicy",
     "HierarchyAssemblyPolicy",
+    "PromptOptimizationPolicy",
 ]
