@@ -1,115 +1,59 @@
-# Functional Blueprint: Taxonomy Generation & Prompt Optimization
+# Taxonomy: Academic Hierarchy Generation Pipeline
 
-This document defines what the system must do — the behaviors, rules, and guarantees — without prescribing any file layout, frameworks, or implementation details. It preserves logic so you can rebuild from scratch with freedom of structure.
+Build and maintain a four‑level academic taxonomy from institutional sources with deterministic pipelines, auditable artifacts, and prompt‑driven extraction.
 
-## Purpose
-- Construct a four‑level academic taxonomy from institutional sources with explainable decisions and reproducible outputs.
-- Improve extraction fidelity via prompt optimization while keeping business rules and invariants intact.
+## Project Overview
+- Purpose: generate a reproducible L0→L3 hierarchy (Colleges → Departments → Research Areas → Conference Topics) with explainable decisions.
+- Approach: staged S0–S3 pipeline plus post‑processing (validation, enrichment, disambiguation, deduplication) and final hierarchy assembly.
+- Design: deterministic where possible (seeds, stable sorts), policy‑driven thresholds, and centralized prompts via the `taxonomy.llm` wrapper.
 
-## Scope
-- Levels: 0 Colleges/Schools → 1 Departments → 2 Research Areas → 3 Conference Topics.
-- Steps: S0 Raw Extraction → S1 Extraction & Normalization (LLM) → S2 Cross‑Institution Frequency Filtering → S3 Single‑Token Verification (LLM + rules).
-- Cross‑cutting: Deduplication, Disambiguation, Validation (rule/web/LLM), Hierarchy Assembly, Observability.
+## Quick Start
+- Environment
+  - `python -m venv .venv && source .venv/bin/activate`
+  - `pip install -e .[dev]`
+- Validate config
+  - `python main.py validate --environment development`
+- Run the pipeline (with resume)
+  - `python main.py run --environment development [--resume-phase S2]`
+- Tests, lint, format
+  - `pytest [-k s3_token_verification]`
+  - `ruff check src tests`
+  - `black src tests`
 
-## Core Tenets
-- Single source of truth for prompts and thresholds (no inline ad‑hoc instructions).
-- Progressive refinement: each step tightens quality using explicit gates.
-- Determinism where possible: fixed seeds, stable sort keys, idempotent operations.
-- Error containment: every step produces auditable artifacts and reasons for keeps/drops.
-- Functional mindset: pure transformations over hidden global state.
-- Centralized LLM package: all LLM calls use the project LLM package (DSPy-backed), which loads optimized prompts from disk by key; business logic never embeds prompt text.
+## Architecture Overview
+- Phases: S0 Raw Extraction → S1 Extraction & Normalization → S2 Frequency Filtering → S3 Single‑Token Verification → Post‑Processing → Hierarchy Assembly.
+- Orchestration: checkpointed, resumable execution with persisted artifacts under `output/runs/<run_id>/` and logs under `logs/`.
+- LLM usage: all prompts live under `prompts/` and are executed only via `taxonomy.llm` with deterministic settings (temperature 0, JSON mode).
 
-## Top‑Level Run Logic (Orchestration)
-- Phase 1 — Generate by Level (0 → 3)
-  - For each level in order: run S0 (raw extraction) → S1 (LLM extraction/normalization) → S2 (cross‑institution filtering) → S3 (single‑token verification).
-  - Output of this phase is a staged, per‑level set of candidates with provenance and gate rationales.
+## Documentation Map
+- Functional blueprint (logic spec): `docs/functional-blueprint.md`.
+- Detailed module specs: `docs/modules/` (implementation‑agnostic, invariants, acceptance scenarios).
+- Per‑module READMEs: colocated with code in `src/taxonomy/**/README.md` (APIs, data contracts, examples).
+- Module index and status: `docs/MODULE_INDEX.md`.
+- Documentation standards: `docs/DOCUMENTATION_GUIDE.md`.
+- Policies and versions: `docs/policies.md`.
 
-- Phase 2 — Consolidate Raw Term Universe
-  - Combine staged outputs from all four levels into a single raw term universe (terms + parent anchors/lineage) for post‑processing.
+## Module Organization
+- `src/taxonomy/`
+  - `config/` (settings, policy defaults)
+  - `orchestration/` (checkpointed runner)
+  - `pipeline/` (S0–S3 and post‑processing)
+  - `llm/`, `observability/`, `web_mining/`, `utils/` (cross‑cutting)
+- Prompts: `prompts/` (registry, schemas, templates)
 
-- Phase 3 — Post‑Processing Pipeline
-  - Validate → Enrich (Web Mining) → Disambiguate → Deduplicate, in that order.
-  - Enrichment augments evidence (web snapshots, snippets); it is typically run once per TTL window.
-  - Validation, Disambiguation, and Deduplication may be iterated multiple times until stable (no changes).
+## Development Workflow
+- Keep tests, lint, and formatting green before committing.
+- Maintain determinism: honor seeds, limit retries, and log token usage.
+- Policy changes: update `docs/policies.md`, bump versions, and reflect deltas in module docs.
 
-- Phase 4 — Resume and Maintainability
-  - Every phase emits persistent, auditable artifacts and operation logs (e.g., validations, SplitOps, MergeOps).
-  - Runs are re‑entrant: you can resume from any completed phase, or re‑run iterative phases until convergence.
-  - Enrichment honors TTL; other phases are idempotent given identical inputs and policies.
+## Key Resources
+- Logic blueprint: `docs/functional-blueprint.md`
+- Module index: `docs/MODULE_INDEX.md`
+- Documentation guide: `docs/DOCUMENTATION_GUIDE.md`
+- Policies: `docs/policies.md`
+- Changelog: `CHANGELOG.md`
 
-- Phase 5 — Finalization
-  - Assemble the four‑level hierarchy (acyclic, unique paths), generate summaries, and freeze a manifest with versions, thresholds, counters, and evidence samples.
-
-## Pipeline Logic (Implementation‑Agnostic)
-- S0 Raw Extraction
-  - Fetch institutional content (catalogs, department lists, research groups, conference topics).
-  - Segment into records with provenance (URL, institution, timestamp, section anchors).
-  - Apply structural filters: language check, length bounds, allowed characters, boilerplate removal.
-
-- S1 Extraction & Normalization
-  - Use a prompt to extract level‑appropriate candidate concepts from each record.
-  - Normalize to canonical surface forms (case, punctuation, spacing, diacritics, acronym policy).
-  - Emit parent anchors (e.g., map a department to its college) and keep aliases/synonyms.
-
-- S2 Cross‑Institution Frequency Filtering
-  - Aggregate candidate supports across distinct institutions and independent sources.
-  - Apply per‑level thresholds (Areas/Topics stricter than Colleges/Departments).
-  - Retain support evidence: counts, institution list, representative snippets.
-
-- S3 Single‑Token Verification
-  - Ensure labels conform to minimal canonical token rules for downstream use.
-  - Combine deterministic rule checks with an LLM confirmation prompt; exceptions require justification.
-
-## Quality Gates (What “Pass” Means)
-- Structural: valid text, expected language, within length, allowed characters.
-- Semantic: normalized equivalence groups; alias tracking; consistent parentage.
-- Frequency: minimum distinct‑institution support; robust to near‑duplicate pages.
-- Domain: level‑appropriate vocabulary; aligns with academic norms.
-
-## Deduplication
-- Build similarity evidence from normalized strings, token overlap, abbreviation expansion, and domain heuristics.
-- Merge highly similar items into a single canonical node; accumulate provenance and support.
-- Canonical selection policy: shortest normalized label → highest cross‑institution support → stable tie‑break.
-
-## Disambiguation
-- Detect identical surface forms with conflicting contexts/parents.
-- Split into distinct senses leveraging parent lineage, context windows, and an LLM disambiguation prompt.
-- Preserve rationale for each split and maintain traceability to originals.
-
-## Validation (Three Modes)
-- Rule: regex/vocabulary checks for form and level appropriateness.
-- Web: presence/consistency in authoritative pages; store evidence snippets.
-- LLM: entailment‑style yes/no with strict JSON outputs; no free‑form prose.
-
-## Hierarchy Assembly
-- Assemble a DAG constrained to four levels with acyclicity and unique L0→L3 paths.
-- Enforce parent‑child constraints and prevent shortcuts or cross‑level leaks.
-- Produce a final manifest with counts per level, merge/split logs, and validation summaries.
-
-## Non‑Functional Requirements
-- Reproducibility: seed control, deterministic ordering, versioned prompts/thresholds.
-- Observability: counters per step (kept/dropped/merged/split), token usage (if applicable), error rates.
-- Failure isolation: quarantine non‑conforming records with explicit reasons; never fail the batch.
-
-## Acceptance Criteria
-- Small, known fixtures reproduce prior taxonomy decisions (within agreed tolerances).
-- Every kept node includes provenance, support evidence, and gate pass reasons.
-- No cycles; dedup merges and disambiguation splits are explainable and reversible via logs.
-
-## Guardrails for a Fresh Implementation
-- Keep external fetching and model calls behind thin, swappable boundaries.
-- Centralize prompts and thresholds; version anything that can change outputs.
-- Prefer explicit, immutable artifacts between steps over in‑memory handoffs.
-
-## Cutover (Logic‑First)
-1) Recreate prompts and normalization rules; freeze thresholds per level.
-2) Rebuild S0→S3 behaviors with fixtures covering edge cases (acronyms, hyphenation, cross‑listed units).
-3) Add dedup/disambiguation and the three validation modes; verify global invariants.
-4) Assemble the hierarchy and compare against historical fixtures; document deltas.
-5) Optimize prompts on a frozen eval set; improvements must preserve invariants and gates.
-
-## Open Questions to Decide Early
-- Multi‑word policy at Levels 2/3 (allowlist vs. general exceptions).
-- Thresholds for “distinct institution” when campuses share governance.
-- Canonical label tie‑break priority order beyond length/support.
-- Treatment of cross‑listed departments across multiple colleges.
+## Contributing
+- Use Conventional Commit subjects (e.g., `feat:`, `chore:`) and add context in bodies as needed.
+- Link runs/manifests in PRs; attach diffs for prompt or policy updates.
+- Request review only after `pytest`, `ruff`, and `black` succeed; note any skipped checks.
