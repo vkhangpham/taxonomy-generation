@@ -5,6 +5,7 @@ description = "Academic taxonomy generation system"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
+    "click>=8.1.0",
     "pydantic>=2.0.0",
     "polars>=0.20.0",
     "openpyxl>=3.1.0",
@@ -19,6 +20,8 @@ dependencies = [
     "langdetect>=1.0.9",
     "loguru>=0.7.0",
     "tqdm>=4.66.0",
+    "typer>=0.12.0",
+    "rich>=13.0.0",
     "pyyaml>=6.0",
     "python-dotenv>=1.0.0",
     "pydantic-settings>=2.0.0",
@@ -39,6 +42,22 @@ dev = [
     "black>=23.0.0",
     "ruff>=0.1.0",
 ]
+
+[project.scripts]
+taxonomy = "taxonomy.cli.main:app"
+generate = "taxonomy.cli.pipeline:generate"
+validate = "taxonomy.cli.postprocess:validate"
+deduplicate = "taxonomy.cli.postprocess:deduplicate"
+disambiguate = "taxonomy.cli.postprocess:disambiguate"
+mine-resources = "taxonomy.cli.utilities:mine_resources"
+optimize-prompt = "taxonomy.cli.utilities:optimize_prompt"
+taxonomy-status = "taxonomy.cli.management:status"
+taxonomy-resume = "taxonomy.cli.management:resume"
+taxonomy-manifest = "taxonomy.cli.management:manifest"
+taxonomy-config = "taxonomy.cli.management:config"
+taxonomy-test = "taxonomy.cli.development:test"
+taxonomy-debug = "taxonomy.cli.development:debug"
+taxonomy-export = "taxonomy.cli.development:export"
 
 [build-system]
 requires = ["setuptools>=67", "wheel"]
