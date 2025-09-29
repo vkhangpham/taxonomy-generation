@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import time
 from dataclasses import dataclass
@@ -190,18 +191,41 @@ class DSPyProviderAdapter:
     def _extract_text(raw_response: Any) -> str:
         if raw_response is None:
             raise ProviderError("DSPy backend returned no response", retryable=True)
+        if isinstance(raw_response, bytes):
+            return raw_response.decode("utf-8", errors="ignore")
         if isinstance(raw_response, str):
             return raw_response
+        if isinstance(raw_response, (list, tuple)):
+            collapsed = [item for item in raw_response if item is not None]
+            if not collapsed:
+                raise ProviderError("DSPy backend returned empty response", retryable=True)
+            if len(collapsed) == 1:
+                return DSPyProviderAdapter._extract_text(collapsed[0])
+
+            normalized_items = []
+            for item in collapsed:
+                text_item = DSPyProviderAdapter._extract_text(item)
+                try:
+                    normalized_items.append(json.loads(text_item))
+                except (TypeError, ValueError, json.JSONDecodeError):
+                    normalized_items.append(text_item)
+            try:
+                return json.dumps(normalized_items)
+            except (TypeError, ValueError):
+                return " ".join(str(item) for item in normalized_items)
         if hasattr(raw_response, "text"):
-            return getattr(raw_response, "text")
+            return DSPyProviderAdapter._extract_text(getattr(raw_response, "text"))
         if hasattr(raw_response, "completion"):
             completion = getattr(raw_response, "completion")
-            if isinstance(completion, str):
-                return completion
+            return DSPyProviderAdapter._extract_text(completion)
         if isinstance(raw_response, dict):
             for key in ("text", "completion", "content"):
-                if key in raw_response and isinstance(raw_response[key], str):
-                    return raw_response[key]
+                if key in raw_response:
+                    return DSPyProviderAdapter._extract_text(raw_response[key])
+            try:
+                return json.dumps(raw_response)
+            except (TypeError, ValueError):
+                return str(raw_response)
         return str(raw_response)
 
     @staticmethod

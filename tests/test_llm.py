@@ -16,7 +16,7 @@ from taxonomy.llm import (
 )
 from taxonomy.llm.models import PerformanceMetrics, TokenUsage
 from taxonomy.llm.observability import MetricsCollector
-from taxonomy.llm.providers import ProviderManager
+from taxonomy.llm.providers import DSPyProviderAdapter, ProviderManager
 
 
 @pytest.fixture()
@@ -187,3 +187,17 @@ def test_llm_client_records_retry_metrics(client: LLMClient) -> None:
     assert snapshot.counters.get("calls_total") == 2
     assert snapshot.counters.get("ok") == 1
     assert snapshot.counters.get("invalid_json") == 1
+
+
+def test_dspy_adapter_extracts_singleton_list_string() -> None:
+    payload = ['{"candidates": []}']
+    assert DSPyProviderAdapter._extract_text(payload) == '{"candidates": []}'
+
+
+def test_dspy_adapter_handles_completion_attribute_wrapping_list() -> None:
+    class Response:
+        def __init__(self, completion):
+            self.completion = completion
+
+    response = Response([{"key": "value"}])
+    assert DSPyProviderAdapter._extract_text(response) == '{"key": "value"}'
