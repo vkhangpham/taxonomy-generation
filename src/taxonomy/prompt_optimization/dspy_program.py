@@ -83,12 +83,14 @@ class TaxonomyExtractor(dspy.Module):
         few_shot_k: int = 0,
         constraint_variant: str = "baseline",
         ordering_seed: int = 20250927,
+        temperature: float | None = None,
     ) -> None:
         super().__init__()
         self.instructions = instructions.strip() if instructions else _DEFAULT_INSTRUCTIONS
         self.few_shot_k = max(0, int(few_shot_k))
         self.constraint_variant = constraint_variant if constraint_variant in _CONSTRAINT_VARIANTS else "baseline"
         self.ordering_seed = ordering_seed
+        self.temperature = temperature
         self._example_bank: List[dspy.Example] = list(few_shot_examples or [])
         self.prog = dspy.ChainOfThought(TaxonomyExtractionSignature, instructions=self.instructions)
 
@@ -96,6 +98,12 @@ class TaxonomyExtractor(dspy.Module):
         """Replace the example bank used for few-shot conditioning."""
 
         self._example_bank = list(examples)
+
+    @staticmethod
+    def available_constraint_variants() -> List[str]:
+        """Return the registered constraint variant identifiers."""
+
+        return list(_CONSTRAINT_VARIANTS.keys())
 
     def forward(self, institution: str, level: int | str, source_text: str) -> TaxonomyExtractionResult:  # type: ignore[override]
         """Execute the extraction prompt with deterministic guardrails."""
@@ -160,6 +168,7 @@ class TaxonomyExtractor(dspy.Module):
             "few_shot_k": self.few_shot_k,
             "ordering_seed": self.ordering_seed,
             "has_examples": bool(self._example_bank),
+            "temperature": self.temperature,
         }
 
     def _render_exemplars(self, level: int) -> str:

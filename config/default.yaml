@@ -177,6 +177,17 @@ policies:
     explore_constraint_variants: true
     default_few_shot_k: 2
     constraint_variant: baseline
+    few_shot_k_options:
+      - 0
+      - 2
+      - 4
+    temperature_variants:
+      - 0.0
+      - 0.2
+    constraint_variants:
+      - baseline
+      - guarded
+      - compact
     json_validity_threshold: 0.995
     schema_adherence_threshold: 1.0
     strict_guardrail_enforcement: true

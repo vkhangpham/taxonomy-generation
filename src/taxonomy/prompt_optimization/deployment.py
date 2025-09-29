@@ -49,7 +49,14 @@ class VariantDeployer:
         timestamp = dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds")
         new_variant_key = self._next_variant_key(variants)
         template_content = program.render_template()
-        template_path = self._write_template(prompt_key, new_variant_key, template_content)
+        base_template_path = Path(str(base_variant.get("template", "")))
+        relative_dir = base_template_path.parent if base_template_path.parent != Path(".") else None
+        template_path = self._write_template(
+            prompt_key,
+            new_variant_key,
+            template_content,
+            relative_directory=relative_dir,
+        )
 
         new_variant = deepcopy(base_variant)
         new_variant.update(
@@ -82,28 +89,38 @@ class VariantDeployer:
         self._write_registry(registry)
         return new_variant_key, template_path
 
-    def _write_template(self, prompt_key: str, variant_key: str, content: str) -> Path:
+    def _write_template(
+        self,
+        prompt_key: str,
+        variant_key: str,
+        content: str,
+        *,
+        relative_directory: Path | str | None = None,
+    ) -> Path:
         slug = self._sanitize_slug(prompt_key)
         filename = f"{slug}_{variant_key}.jinja2"
         base_dir = self._templates_root.resolve()
         base_dir.mkdir(parents=True, exist_ok=True)
-        path = (base_dir / filename).resolve()
+
+        target_dir = base_dir
+        if relative_directory:
+            rel_dir = Path(relative_directory)
+            if rel_dir.is_absolute():
+                raise ValueError("relative_directory must be relative to templates root")
+            if any(part == ".." for part in rel_dir.parts):
+                raise ValueError("relative_directory cannot traverse outside templates root")
+            target_dir = (base_dir / rel_dir).resolve()
+            if base_dir not in target_dir.parents and target_dir != base_dir:
+                raise ValueError("Resolved template path escapes templates directory")
+        target_dir.mkdir(parents=True, exist_ok=True)
+
+        path = (target_dir / filename).resolve()
         if base_dir not in path.parents and path.parent != base_dir:
             raise ValueError("Resolved template path escapes templates directory")
         final_content = content if content.endswith("\n") else f"{content}\n"
         with path.open("w", encoding="utf-8") as handle:
             handle.write(final_content)
-        resolved_base = base_dir
-        resolved_parent = resolved_base.parent
-        resolved_path = path
-        try:
-            relative_path = resolved_path.relative_to(resolved_parent)
-        except ValueError:
-            try:
-                relative_path = resolved_path.relative_to(resolved_base)
-            except ValueError:
-                relative_path = Path(filename)
-        return relative_path
+        return path.relative_to(base_dir)
 
     def _load_registry(self) -> Dict[str, Any]:
         if not self._registry_file.exists():

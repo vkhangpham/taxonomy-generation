@@ -97,7 +97,7 @@ def test_variant_deployer_creates_new_variant(tmp_path: Path) -> None:
     registry_src = PROMPTS_DIR / "registry.yaml"
     registry_copy = tmp_path / "registry.yaml"
     shutil.copy2(registry_src, registry_copy)
-    templates_root = tmp_path / "prompts" / "templates"
+    templates_root = tmp_path / "prompts"
 
     class StubProgram:
         def render_template(self) -> str:
@@ -120,7 +120,7 @@ def test_variant_deployer_creates_new_variant(tmp_path: Path) -> None:
     )
 
     assert variant_key.startswith("v")
-    created_template = templates_root.parent / template_path
+    created_template = templates_root / template_path
     assert created_template.exists()
 
     with registry_copy.open("r", encoding="utf-8") as handle:
@@ -172,3 +172,9 @@ def test_one_time_optimizer_runs_without_deploy(monkeypatch: pytest.MonkeyPatch,
     assert result.optimization_report["train_examples"] > 0
     assert result.optimization_report["validation_examples"] > 0
     assert "metric" in result.optimization_report
+    trials = result.optimization_report.get("lever_trials", [])
+    assert isinstance(trials, list)
+    assert len(trials) >= 1
+    selected = result.optimization_report.get("selected_config", {})
+    assert selected
+    assert set(selected.keys()) == {"few_shot_k", "constraint_variant", "temperature"}

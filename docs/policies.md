@@ -1,6 +1,6 @@
 # Global Policies — Thresholds, Rules, and Tech Defaults
 
-Policy version: 0.1 (draft). This file centralizes level-wise thresholds, label policies, identity mapping, web domain rules, and deterministic LLM/optimization settings. It is implementation-agnostic and binding for re-implementation.
+Policy version: 0.2. This file centralizes level-wise thresholds, label policies, identity mapping, web domain rules, and deterministic LLM/optimization settings. It is implementation-agnostic and binding for re-implementation.
 
 ## Levels and Thresholds
 - Level 0 (Colleges/Schools)
@@ -79,8 +79,8 @@ LLM Package Policy
 ## Prompt Optimization (DSPy + GEPA)
 - Objective: maximize F1 on extraction (primary), subject to guardrails: JSON validity ≥ 99.5%, schema adherence 100%.
 - Secondary criteria: latency and token cost; use as tie-breakers within ±0.5% F1.
-- Search levers: few-shot K, constraint wording, example ordering seed, temperature ∈ {0.0, 0.2}.
-- Protocol: stratified train/dev split; early stopping on no improvement; max_trials default 48 per prompt key.
+- Search levers: few-shot K (`few_shot_k_options`), constraint wording (`constraint_variants`), example ordering seed, temperature (`temperature_variants`).
+- Protocol: stratified train/dev split; early stopping on no improvement; max_trials default 48 per prompt key. Record every lever trial (config, score, guardrail summary) in optimization manifests.
 - Promotion rule: only promote variants that pass guardrails and do not violate label/hierarchy policies.
 
 ## Dedup/Disambiguation Policies

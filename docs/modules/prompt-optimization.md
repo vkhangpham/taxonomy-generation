@@ -24,10 +24,10 @@ DSPy + GEPA Primer
 - Configure a capable reflection LM (default `gpt-4.1-mini`) plus optional teacher optimizer kwargs; the production student model remains unchanged during trials.citeturn8open3
 
 Search Levers (examples)
-- Few-shot K ∈ {0,2,4}
-- Constraint wording variants
-- Example ordering seeds
-- Temperature ∈ {0.0, 0.2}
+- Few-shot K values defined in `policies.prompt_optimization.few_shot_k_options` (default {0,2,4})
+- Constraint wording variants from `policies.prompt_optimization.constraint_variants`
+- Example ordering seeds (still randomized via `ordering_seed`)
+- Temperature values from `policies.prompt_optimization.temperature_variants` (default {0.0, 0.2})
 - Brevity/formatting constraints
 
 Metric & Feedback Design
@@ -39,7 +39,7 @@ Protocol
 - Stratified split (train/dev); early stop on no improvement over N trials.
 - Error taxonomy: duplicates, missed synonyms, over-extractions, JSON failures.
 - Report per-level deltas; never promote a variant that breaks invariants.
-- Run GEPA with `track_stats=True` (and optional MLflow upload) so each reflection cycle logs prompts, feedback, and scores for replayable manifests.citeturn8open0turn9open2
+- Persist lever sweeps: the optimization report now records `lever_trials` with the score and guardrail summary for every searched configuration, plus `selected_config` for the deployed choice.
 
 DSPy Integration Notes
 - Wrap extraction logic in typed DSPy `Signature` classes and compose them into a program so GEPA can serialize module traces and mutate prompts safely.citeturn9find0

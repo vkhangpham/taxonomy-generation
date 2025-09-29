@@ -104,6 +104,9 @@ class TaxonomyEvaluationMetric:
             )
             self._stats.record_json(validation.ok)
             self._stats.record_schema(validation.ok)
+            current_json_validity = 1.0 if validation.ok else 0.0
+            current_schema_adherence = 1.0 if validation.ok else 0.0
+
             if not validation.ok or not isinstance(validation.parsed, list):
                 guardrail_errors.append("Invalid JSON or schema mismatch")
                 predicted = []
@@ -118,13 +121,13 @@ class TaxonomyEvaluationMetric:
                     )
                 )
 
-            if self._stats.json_validity < self._json_validity_threshold:
+            if current_json_validity < self._json_validity_threshold:
                 guardrail_errors.append(
-                    f"JSON validity below threshold: {self._stats.json_validity:.3f}"
+                    f"JSON validity below threshold: {current_json_validity:.3f}"
                 )
-            if self._stats.schema_adherence < self._schema_adherence_threshold:
+            if current_schema_adherence < self._schema_adherence_threshold:
                 guardrail_errors.append(
-                    f"Schema adherence below threshold: {self._stats.schema_adherence:.3f}"
+                    f"Schema adherence below threshold: {current_schema_adherence:.3f}"
                 )
 
             precision, recall, f1 = self._compute_scores(expected_labels, predicted)
