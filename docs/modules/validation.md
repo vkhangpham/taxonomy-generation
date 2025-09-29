@@ -27,6 +27,7 @@ Aggregation Policy
 - Otherwise weighted vote: Rule > Web > LLM; conservative tie-breaks only flip to PASS when the evidence strength (max of web average snippet score and LLM confidence) meets `aggregation.tie_break_min_strength` (defaulting to the LLM confidence threshold).
 - Always record individual findings; expose reasons and evidence in final manifest.
 - Web checks marked `unknown` do not contribute weight to the tally.
+- Rationale invariants: `passed_gates` always maps non-empty string gate names to booleans. Clearing the final gate (passing `None`) resets the aggregate decision to `None` so consumers can distinguish "not evaluated" from a concrete pass/fail outcome.
 
 Failure Handling
 - If web fetch fails repeatedly or the evidence index is empty, mark as unknown (neither pass nor fail) and do not block aggregation.

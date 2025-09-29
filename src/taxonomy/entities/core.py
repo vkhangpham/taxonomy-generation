@@ -178,6 +178,52 @@ class Rationale(BaseModel):
     reasons: List[str] = Field(default_factory=list)
     thresholds: Dict[str, float] = Field(default_factory=dict)
 
+    @field_validator("passed_gates", mode="before")
+    @classmethod
+    def _normalize_passed_gates(cls, value: Mapping[str, Any] | None) -> Dict[str, bool]:
+        if value is None:
+            return {}
+        if isinstance(value, dict):
+            items = value.items()
+        else:
+            try:
+                items = dict(value).items()
+            except Exception as exc:  # pragma: no cover - defensive guard
+                raise ValueError("passed_gates must be a mapping of gate -> bool") from exc
+
+        normalized: Dict[str, bool] = {}
+        for raw_gate, raw_passed in items:
+            if not isinstance(raw_gate, str):
+                raise ValueError("passed_gates keys must be non-empty strings")
+            gate = raw_gate.strip()
+            if not gate:
+                raise ValueError("passed_gates keys must be non-empty strings")
+            if not isinstance(raw_passed, bool):
+                raise ValueError("passed_gates values must be booleans")
+            normalized[gate] = raw_passed
+        return normalized
+
+    def set_gate(self, gate: str, passed: bool | None) -> None:
+        """Update the recorded outcome for a validation gate."""
+
+        if not isinstance(gate, str):
+            raise ValueError("gate must be a non-empty string")
+        name = gate.strip()
+        if not name:
+            raise ValueError("gate must be a non-empty string")
+
+        if passed is None:
+            self.passed_gates.pop(name, None)
+            return
+        if not isinstance(passed, bool):
+            raise ValueError("passed must be a bool or None")
+        self.passed_gates[name] = passed
+
+    def overall(self) -> bool | None:
+        """Aggregate the recorded gate outcomes into a single decision."""
+
+        return None if not self.passed_gates else all(self.passed_gates.values())
+
 
 class Concept(BaseModel):
     """Stable taxonomy node that survived promotion and validation."""
@@ -207,45 +253,28 @@ class Concept(BaseModel):
         return cleaned
 
     def set_validation_passed(self, passed: bool | None, *, gate: str = "validation") -> None:
-        """Record the outcome for a validation gate.
+        """Record the outcome for a validation gate and update the aggregate result.
 
-        Passing ``None`` removes the stored result for ``gate`` so that it no longer
-        influences the aggregate decision. When at least one gate remains,
-        ``validation_passed`` becomes the boolean result of ``all`` existing gate
-        values; if no gates remain it resets to ``None``. The rationale object is
-        mutated in place so callers keep a single, shared decision trail.
+        ``passed`` must be ``True`` or ``False`` to record the outcome of ``gate``
+        and ``None`` to remove a previously recorded value. After each update the
+        concept's ``validation_passed`` flag becomes ``all`` recorded gate values
+        when any remain, otherwise it resets to ``None``.
 
         Args:
-            passed: Gate outcome, or ``None`` to clear a previous value.
-            gate: Name of the gate whose result is being recorded.
+            passed: Gate outcome. ``None`` clears the stored result for ``gate``.
+            gate: Name of the validator gate whose result is being recorded.
 
         Raises:
-            ValueError: If ``gate`` is missing or ``self.rationale`` is unset.
+            ValueError: If ``gate`` is missing, empty, or ``self.rationale`` is unset.
         """
 
-        if not isinstance(gate, str):
-            raise ValueError("gate must be a non-empty string")
-        gate = gate.strip()
-        if not gate:
-            raise ValueError("gate must be a non-empty string")
-
         if self.rationale is None:
-            raise ValueError("Concept.rationale must be initialized before updating validation results")
+            raise ValueError(
+                "Concept.rationale must be initialized before updating validation results"
+            )
 
-        passed_gates = self.rationale.passed_gates
-        if passed_gates is None:
-            passed_gates = self.rationale.passed_gates = {}
-
-        if passed is None:
-            passed_gates.pop(gate, None)
-        else:
-            if not isinstance(passed, bool):
-                raise ValueError("passed must be a bool or None")
-            passed_gates[gate] = passed
-        if not passed_gates:
-            self.validation_passed = None
-        else:
-            self.validation_passed = all(passed_gates.values())
+        self.rationale.set_gate(gate, passed)
+        self.validation_passed = self.rationale.overall()
 
     def validate_hierarchy(self, parent_concepts: Sequence["Concept"] | None = None) -> None:
         """Validate hierarchy invariants.

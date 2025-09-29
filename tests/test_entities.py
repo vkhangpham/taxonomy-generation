@@ -15,6 +15,15 @@ from taxonomy.entities import (
 from taxonomy.entities.core import FindingMode, Provenance, SplitOp
 
 
+def _concept() -> Concept:
+    return Concept(
+        id="c:test",
+        level=1,
+        canonical_label="Test Concept",
+        parents=["c:parent"],
+    )
+
+
 def _provenance() -> Provenance:
     return Provenance(
         institution="Example University",
@@ -104,3 +113,45 @@ def test_split_op_validation() -> None:
         SplitOp(source_id="c:1", new_ids=["c:1"], rule="specialization")
     with pytest.raises(ValueError):
         SplitOp(source_id="c:1", new_ids=["c:2", "c:2"], rule="specialization")
+
+
+def test_concept_validation_passed_aggregates_gates() -> None:
+    concept = _concept()
+
+    concept.set_validation_passed(True, gate="rule")
+    assert concept.rationale.passed_gates == {"rule": True}
+    assert concept.validation_passed is True
+
+    concept.set_validation_passed(True, gate="web")
+    assert concept.validation_passed is True
+    assert concept.rationale.passed_gates == {"rule": True, "web": True}
+
+    concept.set_validation_passed(False, gate="llm")
+    assert concept.validation_passed is False
+    assert concept.rationale.passed_gates["llm"] is False
+
+
+def test_concept_validation_passed_clears_gates() -> None:
+    concept = _concept()
+
+    concept.set_validation_passed(True, gate="rule")
+    concept.set_validation_passed(False, gate="web")
+    assert concept.validation_passed is False
+
+    concept.set_validation_passed(None, gate="rule")
+    assert concept.validation_passed is False
+
+    concept.set_validation_passed(None, gate="web")
+    assert concept.rationale.passed_gates == {}
+    assert concept.validation_passed is None
+
+
+def test_concept_validation_passed_rejects_non_bool_inputs() -> None:
+    concept = _concept()
+
+    numpy = pytest.importorskip("numpy")
+
+    with pytest.raises(ValueError):
+        concept.set_validation_passed(numpy.bool_(True), gate="rule")
+    with pytest.raises(ValueError):
+        concept.set_validation_passed(1, gate="rule")
