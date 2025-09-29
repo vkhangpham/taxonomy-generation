@@ -33,3 +33,4 @@ htmlcov/
 *.swo
 *.log
 .serena-cli/
+dspy_cache/

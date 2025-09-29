@@ -216,7 +216,6 @@ policies:
   validation:
     rules:
       forbidden_patterns:
-      forbidden_patterns:
         - "neurips$"
         - "icml$"
         - "cvpr$"

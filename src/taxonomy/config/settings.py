@@ -13,6 +13,11 @@ from typing import Any, Dict, Literal, Sequence
 import yaml
 from pydantic import BaseModel, Field, model_validator
 
+try:  # pragma: no cover - optional helper for local development convenience
+    from dotenv import load_dotenv
+except ImportError:  # pragma: no cover
+    load_dotenv = None  # type: ignore[assignment]
+
 try:  # pragma: no cover - optional dependency fallback for development environments
     from pydantic_settings import BaseSettings, SettingsConfigDict
 except ImportError:  # pragma: no cover
@@ -42,6 +47,13 @@ def _find_project_root(start: Path) -> Path:
 PROJECT_ROOT = _find_project_root(Path(__file__).resolve().parent)
 DEFAULT_CONFIG_DIR = PROJECT_ROOT / "config"
 DEFAULT_CONFIG_FILE = DEFAULT_CONFIG_DIR / "default.yaml"
+
+if load_dotenv is not None:
+    env_file = PROJECT_ROOT / ".env"
+    if env_file.exists():
+        load_dotenv(dotenv_path=str(env_file), override=False)
+    else:
+        load_dotenv(override=False)
 
 
 def _deep_merge(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any]:

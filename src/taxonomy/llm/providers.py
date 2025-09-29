@@ -157,11 +157,36 @@ class DSPyProviderAdapter:
             raise ProviderError(f"Unsupported DSPy provider '{self._provider}'", retryable=False)
 
         backend_cls = getattr(dspy, "OpenAI" if provider_key == "openai" else "AzureOpenAI", None)
-        if backend_cls is None:
-            raise ProviderError(f"DSPy backend for provider '{self._provider}' is unavailable", retryable=False)
+        if backend_cls is not None:
+            logger.debug(
+                "Initializing DSPy backend via legacy provider",
+                extra={"provider": self._provider, "model": self._model},
+            )
+            return backend_cls(model=self._model)
 
-        logger.debug("Initializing DSPy backend", extra={"provider": self._provider, "model": self._model})
-        return backend_cls(model=self._model)
+        if hasattr(dspy, "LM"):
+            logger.debug(
+                "Initializing DSPy LM backend",
+                extra={"provider": self._provider, "model": self._model},
+            )
+            provider_hint = self._provider if provider_key != "azure_openai" else "azure_openai"
+            try:
+                return dspy.LM(model=self._model, provider=provider_hint)
+            except TypeError:  # pragma: no cover - compatibility fallback
+                if provider_key == "openai":
+                    from dspy.clients.openai import OpenAIProvider
+
+                    provider_impl = OpenAIProvider(model=self._model)
+                    return dspy.LM(model=self._model, provider=provider_impl)
+                raise ProviderError(
+                    f"DSPy provider '{self._provider}' is unsupported by the current version",
+                    retryable=False,
+                )
+
+        raise ProviderError(
+            f"DSPy backend for provider '{self._provider}' is unavailable",
+            retryable=False,
+        )
 
     @staticmethod
     def _extract_text(raw_response: Any) -> str:

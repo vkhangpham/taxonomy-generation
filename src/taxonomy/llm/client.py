@@ -5,11 +5,14 @@ from __future__ import annotations
 import time
 import threading
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Mapping, Optional
+
+import yaml
 
 from jinja2 import Environment, FileSystemLoader, StrictUndefined
 
 from ..config.policies import LLMDeterminismSettings, load_policies
+from ..config.settings import Settings
 from .models import (
     LLMOptions,
     LLMRequest,
@@ -247,10 +250,40 @@ def run(prompt_key: str, variables: Dict[str, Any], options: Optional[LLMOptions
     return client.run(prompt_key=prompt_key, variables=variables, options=options)
 
 
+def _load_policies_from_source(config_file: Path) -> Any:
+    """Resolve a policies payload from *config_file*.
+
+    ``config_file`` may point to a YAML settings bundle containing a top-level
+    ``policies`` key, a standalone policies YAML file, or even a directory that
+    should be treated as a configuration root. The helper normalises these
+    shapes into the mapping expected by :func:`load_policies`.
+    """
+
+    if config_file.is_dir():
+        return Settings(config_dir=config_file).policies
+
+    if config_file.suffix.lower() in {".yaml", ".yml"} and config_file.exists():
+        with config_file.open("r", encoding="utf-8") as handle:
+            loaded = yaml.safe_load(handle) or {}
+        if not isinstance(loaded, Mapping):
+            raise ValueError(
+                f"Policy configuration '{config_file}' must contain a mapping"
+            )
+        source = loaded.get("policies", loaded)
+        return load_policies(source)
+
+    # Fallback to direct loading (supports JSON/YAML files without .yaml suffix).
+    return load_policies(config_file)
+
+
 def _build_default_client(config_path: Optional[Path]) -> LLMClient:
     project_root = Path(__file__).resolve().parents[3]
-    config_file = Path(config_path) if config_path is not None else project_root / "config" / "default.yaml"
-    policies = load_policies(config_file)
+    if config_path is None:
+        policies = Settings().policies
+    else:
+        policies = _load_policies_from_source(Path(config_path))
+        if not hasattr(policies, "llm"):
+            policies = load_policies(policies)
     settings = policies.llm
 
     registry_file = (project_root / settings.registry.file).resolve()

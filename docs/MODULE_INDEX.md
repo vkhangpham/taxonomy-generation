@@ -35,6 +35,9 @@ Legend: ✅ Complete • 📝 Needs Update • ❌ Missing
 ## CLI
 - `cli/` → `src/taxonomy/cli/README.md` — ✅
 
+## Operational Guides
+- `Taxonomy Run Guide` → `docs/modules/pipeline_run_guide.md` — ✅
+
 ## Maintenance Notes
 - Module READMEs now embed the full specification content; treat them as the single source of truth for behavior, thresholds, and contracts.
 - When implementations change, update the corresponding README, adjust status here if a follow-up edit is required, and log policy/version bumps in `docs/policies.md`.

@@ -34,6 +34,8 @@ dependencies = [
     "beautifulsoup4>=4.14.0",
     "charset-normalizer>=3.4.3",
     "pdfplumber>=0.11.7",
+    "fastexcel>=0.16.0",
+    "pyarrow>=21.0.0",
 ]
 
 [project.optional-dependencies]

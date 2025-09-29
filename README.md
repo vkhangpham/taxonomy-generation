@@ -11,6 +11,9 @@ Build and maintain a four-level academic taxonomy from institutional sources wit
 - Set up the environment
   - `python -m venv .venv && source .venv/bin/activate`
   - `pip install -e .[dev]`
+- Provide secrets
+  - Create a `.env` file in the repository root with provider credentials (for example `OPENAI_API_KEY=...`, `FIRECRAWL_API_KEY=...`).
+  - The CLI loads this file automatically, so values become available via `os.environ` and the `TAXONOMY_*` overrides when runs start.
 - Validate configuration and paths
   - `python main.py manage config --validate --environment development`
 - Run the full pipeline (resume-aware)
@@ -48,6 +51,7 @@ Build and maintain a four-level academic taxonomy from institutional sources wit
 
 ## Documentation Map
 - Functional blueprint (system logic): `docs/functional-blueprint.md`
+- Run operations guide: `docs/modules/pipeline_run_guide.md`
 - Module READMEs (single source of truth for specs and quick reference):
   - `src/taxonomy/cli/README.md`
   - `src/taxonomy/llm/README.md`
@@ -93,4 +97,3 @@ Build and maintain a four-level academic taxonomy from institutional sources wit
 - Use Conventional Commit subjects (e.g., `feat:`, `chore:`) and add context in bodies as needed.
 - Link runs/manifests in PRs; attach diffs for prompt or policy updates.
 - Request review only after `pytest`, `ruff`, and `black` succeed; note any skipped checks.
-

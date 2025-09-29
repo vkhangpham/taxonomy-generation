@@ -26,6 +26,7 @@ Quick Start
 Configuration
 - Files: YAML configs merged in order; `Settings` documents precedence.
 - Env overrides: `TAXONOMY_SETTINGS__POLICIES__LLM__MODEL=gpt-4o-mini` style.
+- Local development automatically loads a project-root `.env`; place `TAXONOMY_*` variables or provider keys (e.g. `OPENAI_API_KEY`) there instead of exporting them manually.
 - Policy changes must update `docs/policies.md` and bump version; manifests include policy version.
 
 Dependencies
@@ -149,4 +150,3 @@ Examples
       json_mode: true
       retries: 2
   ```
-
