@@ -1,5 +1,7 @@
 # Hierarchy Assembly — Logic Spec
 
+See also: `docs/logic-spec.md`, `docs/DOCUMENTATION_GUIDE.md`
+
 Purpose
 - Construct a four-level DAG (L0→L3) from validated concepts with acyclicity and unique paths.
 

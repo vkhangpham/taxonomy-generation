@@ -1,5 +1,7 @@
 # LLM Integration — Logic Spec
 
+See also: `docs/logic-spec.md`, `docs/DOCUMENTATION_GUIDE.md`
+
 Purpose
 - Provide a provider-agnostic interface for structured, deterministic LLM calls used by extraction, verification, disambiguation, and validation prompts.
 

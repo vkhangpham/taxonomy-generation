@@ -1,5 +1,7 @@
 # Raw Extraction (S0) — Logic Spec
 
+See also: `docs/logic-spec.md`, `docs/DOCUMENTATION_GUIDE.md`
+
 Purpose
 - Convert heterogeneous institutional pages into analyzable SourceRecords with clean text and provenance.
 

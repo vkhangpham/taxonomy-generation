@@ -1,5 +1,7 @@
 # Validation (Rule/Web/LLM) — Logic Spec
 
+See also: `docs/logic-spec.md`, `docs/DOCUMENTATION_GUIDE.md`
+
 Purpose
 - Provide complementary validation signals to increase precision and document evidence without leaking into business logic.
 
