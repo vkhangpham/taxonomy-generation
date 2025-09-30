@@ -134,7 +134,7 @@ class S3Processor:
             if rule_evaluation.suggestions:
                 rationale.reasons.extend(f"suggestion:{suggestion}" for suggestion in rule_evaluation.suggestions)
             if not rule_evaluation.allowlist_hit:
-                needs_llm = not rule_evaluation.passed
+                needs_llm = token_count == 1 or not rule_evaluation.passed
                 if needs_llm:
                     llm_result = self._llm_verifier.verify(candidate.normalized, candidate.level)
                     rationale.passed_gates["token_llm"] = llm_result.passed
