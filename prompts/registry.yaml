@@ -16,10 +16,15 @@ prompts:
         enforce_order_by: normalized
         optimization_history: []
   taxonomy.verify_single_token:
-    active_variant: v1
+    active_variant: v2
     variants:
       v1:
         description: "Verify that a canonical label stays within the allowed 1–5 token span."
+        template: templates/verification.jinja2
+        schema: schemas/verification.json
+        optimization_history: []
+      v2:
+        description: "Verify that a single-token label clearly denotes a research field/term (multi-token terms bypass this check)."
         template: templates/verification.jinja2
         schema: schemas/verification.json
         optimization_history: []

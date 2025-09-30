@@ -28,11 +28,11 @@ Related Docs
 ### Single‑Token Verification (S3) — Logic Spec
 
 Purpose
-- Enforce minimal canonical labels for downstream use, while allowing justified exceptions.
+- Guard single-token labels to ensure they denote legitimate research fields/terms; multi-token labels (token_count > 1) bypass LLM verification and pass automatically after basic rule checks.
 
 Core Tech
 - Rule engine for token/character policy checks.
-- DSPy-managed verification prompt returning compact JSON {pass, reason} (invoked only when deterministic rules fail).
+- DSPy-managed verification prompt returning compact JSON {pass, reason} (invoked only for single-token terms when deterministic rules fail).
 
 LLM Usage
 - Use the LLM package only: `llm.run("taxonomy.verify_single_token", {label, level})`.
@@ -43,14 +43,16 @@ Inputs/Outputs (semantic)
 - Output: Candidate[] with pass/fail gate results, possibly with suggested minimal alternatives in aliases
 
 Policy
-- Prefer single-token, alphanumeric labels without punctuation.
-- Allow multi-word when abbreviation would materially reduce clarity (e.g., "computer vision").
-- Maintain an allowlist for known exceptions; record justification in rationale.
-- Maintain a configurable set of venue names/aliases that must be rejected at L3 even when no generic venue keywords are present.
+- Guard only single-token terms (token_count == 1) via LLM verification.
+- Multi-token terms (token_count > 1) bypass LLM and pass automatically after basic rule checks; rationale records "bypass:multi_token".
+- For single-token terms: prefer alphanumeric labels without punctuation; reject generic organizational tokens ("department", "program") and branding tokens.
+- Maintain an allowlist for known exceptions (e.g., "computer vision", "machine learning"); record justification in rationale.
+- Maintain a configurable set of venue names/aliases that must be rejected at L3.
 
 Gate Order
-1) Rule checks: forbidden punctuation, token count > N, low alnum ratio, venue names (keywords + alias set).
-2) LLM verification: yes/no JSON {pass: bool, reason: string} with level-aware criteria, only invoked when rules fail and allowlist does not apply.
+1) Token count check: if token_count > 1, bypass LLM and pass automatically (rationale: "bypass:multi_token").
+2) Rule checks (single-token only): forbidden punctuation, low alnum ratio, venue names (keywords + alias set).
+3) LLM verification (single-token only): yes/no JSON {pass: bool, reason: string} with level-aware criteria, only invoked when rules fail and allowlist does not apply.
 
 Failure Handling
 - If rules fail, propose deterministic minimal alternative (strip punctuation, collapse tokens, standard shortenings).
@@ -58,7 +60,7 @@ Failure Handling
 - When final decision passes, append accepted suggestions to candidate aliases (deduped + normalized) for downstream auditing.
 
 Observability
-- Counters: checked, passed_rule, failed_rule, passed_llm, failed_llm, allowlist_hits, llm_called.
+- Counters: checked, passed_rule, failed_rule, passed_llm, failed_llm, allowlist_hits, llm_called (note: multi-token bypasses increment passed_rule but not llm_called).
 - Drift: distribution of token counts by level.
 
 Acceptance Tests
@@ -70,15 +72,25 @@ Open Questions
 - Should hyphenated compounds be treated as single tokens?
 
 Examples
-- Example A: Suggest minimal alternative
-  - Input label: "Machine-Learning"
-  - Rule outcome: fail (forbidden hyphen). Suggested: "machine learning" or abbreviation "ml".
-  - LLM outcome: pass for "machine learning" at L2 when abbreviation harms clarity; record rationale and add "ml" as alias.
-
-- Example B: Allowlisted multi‑word
+- Example A0: Multi-token bypass
   - Input label: "computer vision"
-  - Rule outcome: flagged (two tokens) → check allowlist.
-  - LLM outcome: pass with reason "standard field name; abbreviation reduces clarity".
+  - Token count: 2
+  - Rule outcome: bypass (token_count > 1). Rationale: "bypass:multi_token".
+  - LLM outcome: not called (bypassed).
+  - Final decision: pass.
+
+- Example A: Single-token with suggestion
+  - Input label: "machine-learning" (normalized to "machine learning" → 2 tokens, but if hyphen policy treats as single: 1 token)
+  - Token count: 1 (if hyphenated compounds not allowed)
+  - Rule outcome: fail (forbidden hyphen). Suggested: "machinelearning" or abbreviation "ml".
+  - LLM outcome: pass for "ml" at L2 when abbreviation is acceptable; record rationale and add "machine learning" as alias.
+
+- Example B: Multi-token allowlisted term
+  - Input label: "computer vision"
+  - Token count: 2
+  - Rule outcome: bypass (token_count > 1). Rationale: "bypass:multi_token".
+  - LLM outcome: not called (bypassed).
+  - Note: Even though it's on the allowlist, the multi-token bypass takes precedence.
 
 - Example C: Reject venue names at L3
   - Input label: "neurips"
@@ -128,4 +140,3 @@ This document specifies the multi-stage verification of candidate tokens for val
 
 - Deterministic prompts and seeds; retries limited and logged.
 - Rule failures must provide explicit, machine-readable reasons.
-

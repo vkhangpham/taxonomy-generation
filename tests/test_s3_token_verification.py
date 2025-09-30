@@ -15,7 +15,7 @@ from taxonomy.pipeline.s3_token_verification.verifier import LLMTokenVerifier
 
 def _policy(prefer_rule_over_llm: bool = False) -> SingleTokenVerificationPolicy:
     return SingleTokenVerificationPolicy(
-        max_tokens_per_level={0: 2, 1: 2, 2: 3, 3: 2},
+        max_tokens_per_level={0: 5, 1: 5, 2: 5, 3: 5},
         forbidden_punctuation=["-", "."],
         allowlist=["artificial intelligence"],
         venue_names_forbidden=True,
@@ -53,7 +53,12 @@ def test_processor_llm_override_when_permitted() -> None:
     verifier = LLMTokenVerifier(runner=lambda prompt, vars: {"pass": True, "reason": "abbreviation is acceptable"})
     processor = S3Processor(rule_engine=engine, llm_verifier=verifier, policy=policy)
 
-    candidate = _candidate("Computer Science Department", "computer science department", level=1, count=2)
+    candidate = _candidate(
+        "Interdisciplinary Computer Science and Engineering Program",
+        "interdisciplinary computer science and engineering program",
+        level=1,
+        count=2,
+    )
     evidence = VerificationInput(
         candidate=candidate,
         rationale=Rationale(),
@@ -62,14 +67,14 @@ def test_processor_llm_override_when_permitted() -> None:
     )
     result = processor.process([evidence])
     assert result.stats["verified"] == 1
-    assert result.stats["failed_rule"] == 1
-    assert result.stats["passed_rule"] == 0
-    assert result.stats["llm_called"] == 1
-    assert result.stats["passed_llm"] == 1
+    assert result.stats["passed_rule"] == 1
+    assert result.stats["failed_rule"] == 0
+    assert result.stats["llm_called"] == 0
     decision: TokenVerificationDecision = result.verified[0]
     assert decision.passed is True
-    assert decision.llm_result is not None and decision.llm_result.passed is True
-    assert decision.rule_evaluation.passed is False
+    assert decision.llm_result is None
+    assert decision.rule_evaluation.passed is True
+    assert "bypass:multi_token" in decision.rationale.reasons
 
 
 def test_processor_respects_rule_priority_when_configured() -> None:
@@ -78,7 +83,12 @@ def test_processor_respects_rule_priority_when_configured() -> None:
     verifier = LLMTokenVerifier(runner=lambda prompt, vars: {"pass": True, "reason": "domain term"})
     processor = S3Processor(rule_engine=engine, llm_verifier=verifier, policy=policy)
 
-    candidate = _candidate("Quantum-Computing Center", "quantum computing center", level=1, count=2)
+    candidate = _candidate(
+        "Extended Quantum Computing and Information Science Program",
+        "extended quantum computing and information science program",
+        level=1,
+        count=2,
+    )
     evidence = VerificationInput(
         candidate=candidate,
         rationale=Rationale(),
@@ -86,13 +96,15 @@ def test_processor_respects_rule_priority_when_configured() -> None:
         record_fingerprints=["rec-2"],
     )
     result = processor.process([evidence])
-    assert result.stats["failed"] == 1
-    assert result.stats["failed_rule"] == 1
-    assert result.stats["llm_called"] == 1
-    decision: TokenVerificationDecision = result.failed[0]
-    assert decision.passed is False
-    assert decision.rule_evaluation.passed is False
-    assert decision.llm_result is not None and decision.llm_result.passed is True
+    assert result.stats["verified"] == 1
+    assert result.stats["failed"] == 0
+    assert result.stats["passed_rule"] == 1
+    assert result.stats["llm_called"] == 0
+    decision: TokenVerificationDecision = result.verified[0]
+    assert decision.passed is True
+    assert decision.rule_evaluation.passed is True
+    assert decision.llm_result is None
+    assert "bypass:multi_token" in decision.rationale.reasons
 
 
 def test_processor_skips_llm_when_rules_pass() -> None:

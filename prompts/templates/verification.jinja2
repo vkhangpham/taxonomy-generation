@@ -1,13 +1,15 @@
-You are validating the minimal canonical label for a taxonomy concept.
+You are validating a single-token canonical label for a taxonomy concept.
 All outputs MUST be valid JSON-only with no commentary.
 Label under review: {{ label }}
 Hierarchy level: {{ level }}
 
 Validation checklist:
-- The label must use between 1 and 5 tokens after normalization (hyphenated compounds count as individual tokens when split by policy).
-- Prefer the shortest canonical form within that range that remains unambiguous for level {{ level }}.
-- Reject boilerplate descriptors (e.g., "Department of", "Program in").
-- Preserve institutional acronyms if they are the only distinctive token.
+- The label is a SINGLE TOKEN (no spaces, no hyphens after normalization).
+- Approve ONLY if the token clearly denotes a research field, academic domain, or technical term appropriate for level {{ level }}.
+- Reject generic organizational tokens (e.g., "department", "program", "center", "institute").
+- Reject branding or institutional tokens (e.g., "stanford", "mit", "harvard").
+- Reject venue names or conference acronyms at level 3 (e.g., "neurips", "icml", "cvpr").
+- Preserve well-established field acronyms if they are the only distinctive token (e.g., "ai", "ml", "nlp").
 
 Respond with a JSON object containing:
 {

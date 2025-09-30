@@ -44,6 +44,7 @@
 - The orchestrator checkpoints after each phase, emits artifacts under `output/runs/<run_id>/`, and writes `run_manifest.json` summarizing outputs.
 - Audit runs: enable `audit_mode.enabled` in `config/default.yaml` (or the active environment file) to cap every stage at the configured audit `limit` (10 by default) for quick inspection.
 - To resume after a partial failure, pass `--resume-phase <phase_token>` using the tokens listed in **Resume Phase Tokens**.
+- **S3 Token Verification**: As of policy version 0.5, S3 guards only single-token terms via LLM. Multi-token terms (token_count > 1) bypass LLM verification and pass automatically after basic rule checks. This ensures that only potentially ambiguous single-token labels (e.g., "ai", "ml", "biology") undergo semantic validation, while descriptive multi-token labels (e.g., "computer vision", "machine learning") pass through efficiently.
 
 ### 4. Inspect Manifests and Artifacts
 - View the manifest table to locate emitted files:

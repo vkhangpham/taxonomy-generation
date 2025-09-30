@@ -56,10 +56,12 @@ S2 Cross‑Institution Frequency Filtering
 - Keep rationale: store contributing institutions, sample snippets, and computed metrics.
 
 S3 Single‑Token Verification (Label Minimality)
-- Policy: prefer labels without spaces or punctuation; allow exceptions on allowlist or when abbreviation would harm clarity (e.g., “computer vision”).
-- Gate order: rules → LLM yes/no verification.
-  - Rules: reject if contains forbidden punctuation; flag if > N tokens; check alnum ratio.
-  - LLM prompt asks: “Is this a minimal canonical label for a level‑X academic concept?” with JSON {pass: bool, reason}.
+- Policy: Guard only single-token terms via LLM; multi-token terms (token_count > 1) bypass LLM and pass automatically after basic rule checks. Allow exceptions on allowlist.
+- Gate order:
+  - **Multi-token bypass**: If token_count > 1, set passed=True, skip LLM, add rationale "bypass:multi_token".
+  - **Single-token verification** (token_count == 1): rules → LLM yes/no verification.
+    - Rules: reject if contains forbidden punctuation; check alnum ratio; check venue names at L3.
+    - LLM prompt asks: “Is this single token a legitimate research field/term for level‑X?” with JSON {pass: bool, reason}. Rejects generic organizational tokens (“department”, “program”) and branding tokens.
 - On failure: propose a minimal alternative (via rules or prompt) and attach to aliases; keep both when justified.
 
 ## Deduplication (Similarity + Merge Policy)

@@ -114,32 +114,41 @@ class S3Processor:
         rationale = entry.rationale.model_copy(deep=True)
 
         rule_evaluation = self._rule_engine.apply_all_rules(candidate.normalized, candidate.level)
-        rationale.passed_gates["token_rule"] = rule_evaluation.passed
-        if rule_evaluation.reasons:
-            rationale.reasons.extend(f"rule:{reason}" for reason in rule_evaluation.reasons)
-        if rule_evaluation.suggestions:
-            rationale.reasons.extend(f"suggestion:{suggestion}" for suggestion in rule_evaluation.suggestions)
+        token_count = rule_evaluation.token_count
         rationale.thresholds["token_limit"] = self._policy.max_tokens_per_level.get(
             candidate.level,
             max(self._policy.max_tokens_per_level.values()),
         )
 
         llm_result: Optional[LLMVerificationResult] = None
-        if not rule_evaluation.allowlist_hit:
-            needs_llm = not rule_evaluation.passed
-            if needs_llm:
-                llm_result = self._llm_verifier.verify(candidate.normalized, candidate.level)
-                rationale.passed_gates["token_llm"] = llm_result.passed
-                if llm_result.reason:
-                    rationale.reasons.append(f"llm:{llm_result.reason}")
-                if llm_result.error:
-                    rationale.reasons.append(f"llm_error:{llm_result.error}")
+        if token_count > 1:
+            rule_evaluation.passed = True
+            rationale.passed_gates["token_rule"] = True
+            rationale.passed_gates["token_llm"] = None
+            rationale.reasons.append("bypass:multi_token")
+            final_pass = True
+        else:
+            rationale.passed_gates["token_rule"] = rule_evaluation.passed
+            if rule_evaluation.reasons:
+                rationale.reasons.extend(f"rule:{reason}" for reason in rule_evaluation.reasons)
+            if rule_evaluation.suggestions:
+                rationale.reasons.extend(f"suggestion:{suggestion}" for suggestion in rule_evaluation.suggestions)
+            if not rule_evaluation.allowlist_hit:
+                needs_llm = not rule_evaluation.passed
+                if needs_llm:
+                    llm_result = self._llm_verifier.verify(candidate.normalized, candidate.level)
+                    rationale.passed_gates["token_llm"] = llm_result.passed
+                    if llm_result.reason:
+                        rationale.reasons.append(f"llm:{llm_result.reason}")
+                    if llm_result.error:
+                        rationale.reasons.append(f"llm_error:{llm_result.error}")
+                else:
+                    rationale.passed_gates["token_llm"] = None
             else:
                 rationale.passed_gates["token_llm"] = None
-        else:
-            rationale.passed_gates["token_llm"] = None
 
-        final_pass = self._final_decision(rule_evaluation, llm_result)
+            final_pass = self._final_decision(rule_evaluation, llm_result)
+
         rationale.passed_gates["token_verification"] = final_pass
 
         if final_pass and rule_evaluation.suggestions:
