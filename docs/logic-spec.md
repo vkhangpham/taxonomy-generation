@@ -7,7 +7,7 @@ This specification defines the functional logic, decision rules, and invariants 
   - text (string), provenance {institution, url, section, fetched_at}, meta {language, charset, hints}
   - Purpose: smallest analyzable unit after segmentation; carries evidence.
 - Candidate (pre‑merge, pre‑disambiguation)
-  - level ∈ {0,1,2,3}, label (original), normalized (canonical), parents (anchors or ids; may be empty above L0 when unresolved), aliases[], support {records[], institutions[], count}
+  - level ∈ {0,1,2,3}, label (level‑aware: L0 stores the extracted research topic/field derived from the unit text; L1–L3 store the original unit text), normalized (canonical), parents (anchors or ids; may be empty above L0 when unresolved), aliases[], support {records[], institutions[], count}
   - Purpose: unit of decision‑making across S1–S3.
 - Concept (post‑gates)
   - id (stable), level, canonical_label, parents, aliases[], support, rationale {passed_gates[], reasons, thresholds}
