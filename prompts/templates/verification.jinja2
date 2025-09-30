@@ -4,8 +4,8 @@ Label under review: {{ label }}
 Hierarchy level: {{ level }}
 
 Validation checklist:
-- The label must be a single token unless policy allows hyphenated compounds.
-- Prefer shortest canonical form that remains unambiguous for level {{ level }}.
+- The label must use between 1 and 5 tokens after normalization (hyphenated compounds count as individual tokens when split by policy).
+- Prefer the shortest canonical form within that range that remains unambiguous for level {{ level }}.
 - Reject boilerplate descriptors (e.g., "Department of", "Program in").
 - Preserve institutional acronyms if they are the only distinctive token.
 
