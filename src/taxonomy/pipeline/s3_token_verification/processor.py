@@ -114,7 +114,7 @@ class S3Processor:
         rationale = entry.rationale.model_copy(deep=True)
 
         rule_evaluation = self._rule_engine.apply_all_rules(candidate.normalized, candidate.level)
-        token_count = rule_evaluation.token_count
+        token_count = self._rule_engine.count_tokens(candidate.normalized)
         rationale.thresholds["token_limit"] = self._policy.max_tokens_per_level.get(
             candidate.level,
             max(self._policy.max_tokens_per_level.values()),
