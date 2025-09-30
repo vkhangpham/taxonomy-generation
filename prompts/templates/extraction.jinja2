@@ -8,7 +8,7 @@ Source material:
 """
 
 Guidelines:
-- Every candidate object MUST contain ``label`` (verbatim text), ``normalized`` (canonical form spanning 1–5 tokens), ``aliases`` (array, may be empty), and ``parents`` (array of textual anchors; empty ONLY for level 0).
+- Every candidate object MUST contain ``label`` (for level 0: the extracted research topic/field; for levels 1–3: the verbatim unit text), ``normalized`` (canonical form spanning 1–5 tokens), ``aliases`` (array, may be empty), and ``parents`` (array of textual anchors; empty ONLY for level 0).
 - Keep ``normalized`` as the full academic concept phrase; do not compress to initials or single-token handles unless the source itself is single-token.
 - Sort the array by the lowercase ``normalized`` field to guarantee deterministic output.
 - Never invent information or copy unrelated boilerplate; omit uncertain items.
