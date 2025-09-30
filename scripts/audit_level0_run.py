@@ -318,6 +318,7 @@ def _run_s1(
     *,
     settings: Settings,
     observability: ObservabilityContext,
+    level: int,
     source_records: Path,
     output_path: Path,
     metadata_path: Path,
@@ -329,7 +330,7 @@ def _run_s1(
     start = perf_counter()
     candidates = extract_candidates(
         source_records,
-        level=args.level,
+        level=level,
         output_path=output_path,
         metadata_path=metadata_path,
         batch_size=batch_size,
@@ -367,6 +368,7 @@ def _run_s2(
     *,
     settings: Settings,
     observability: ObservabilityContext,
+    level: int,
     candidates_path: Path,
     output_path: Path,
     dropped_path: Path,
@@ -378,7 +380,7 @@ def _run_s2(
     start = perf_counter()
     result = filter_by_frequency(
         candidates_path,
-        level=args.level,
+        level=level,
         output_path=output_path,
         dropped_output_path=dropped_path,
         metadata_path=metadata_path,
@@ -419,6 +421,7 @@ def _run_s2(
 def _run_s3(
     *,
     settings: Settings,
+    level: int,
     candidates_path: Path,
     output_path: Path,
     failed_path: Path,
@@ -430,7 +433,7 @@ def _run_s3(
     start = perf_counter()
     result = verify_tokens(
         candidates_path,
-        level=args.level,
+        level=level,
         output_path=output_path,
         failed_output_path=failed_path,
         metadata_path=metadata_path,
@@ -603,6 +606,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             _run_s1(
                 settings=settings,
                 observability=observability,
+                level=args.level,
                 source_records=s0_records_path,
                 output_path=s1_output,
                 metadata_path=s1_metadata,
@@ -619,6 +623,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             _run_s2(
                 settings=settings,
                 observability=observability,
+                level=args.level,
                 candidates_path=s1_output,
                 output_path=s2_output,
                 dropped_path=s2_dropped,
@@ -634,6 +639,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         stage_results.append(
             _run_s3(
                 settings=settings,
+                level=args.level,
                 candidates_path=s2_output,
                 output_path=s3_output,
                 failed_path=s3_failed,
