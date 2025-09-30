@@ -85,7 +85,7 @@ This guide documents the end-to-end process for executing a taxonomy audit at an
 - **Missing credentials**: The orchestrator checks for required environment variables and exits with a descriptive error. Export the credentials and rerun.
 - **Polars import errors during S0 Excel bootstrap**: Install `polars` (`pip install polars`) and rerun the audit. The dependency is required for Excel ingestion.
 - **Excel mode not supported for level 1-3**: If you see "--s0-mode=excel is only supported for level 0", use `--s0-mode=snapshots` with `--snapshots-path` or `--s0-mode=reuse` with `--existing-s0-path` instead. Excel bootstrap is only available for level 0.
-- **LLM provider timeouts in S3**: Verify production API quotas, then rerun S3 in isolation via `python -m scripts.audit_level0_run --s0-mode reuse --existing-s0-path ...` to avoid repeating earlier stages.
+- **LLM provider timeouts in S3**: Verify production API quotas, then rerun S3 in isolation via `python -m scripts.audit_level0_run --level <matching-level> --s0-mode reuse --existing-s0-path ...` to avoid repeating earlier stages. Ensure `--level` matches the audit run you are recovering so downstream stages stay aligned.
 - **Large audit outputs**: Ensure the audit limit matches expectations. If outputs exceed the cap, confirm both `audit_mode.enabled` and `audit_mode.limit` are set correctly in `audit_config.yaml`, or pass `--limit <n>` when invoking the script, then rerun the pipeline.
 
 Following this procedure ensures each audit run (at any level) is reproducible, thoroughly documented, and ready for downstream remediation work.
