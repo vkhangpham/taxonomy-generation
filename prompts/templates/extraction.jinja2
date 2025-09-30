@@ -8,7 +8,8 @@ Source material:
 """
 
 Guidelines:
-- Every candidate object MUST contain ``label`` (verbatim text), ``normalized`` (canonical form), ``aliases`` (array, may be empty), and ``parents`` (array of textual anchors; empty ONLY for level 0).
+- Every candidate object MUST contain ``label`` (verbatim text), ``normalized`` (canonical form spanning 1–5 tokens), ``aliases`` (array, may be empty), and ``parents`` (array of textual anchors; empty ONLY for level 0).
+- Keep ``normalized`` as the full academic concept phrase; do not compress to initials or single-token handles unless the source itself is single-token.
 - Sort the array by the lowercase ``normalized`` field to guarantee deterministic output.
 - Never invent information or copy unrelated boilerplate; omit uncertain items.
 - Preserve strong evidence for parent anchors: use section headers, breadcrumb text, or explicit mentions. When none exist, return an empty ``parents`` array (level 0 only).
@@ -35,6 +36,7 @@ Level definitions:
 
 Normalization hints:
 - Lowercase for ``normalized``; remove diacritics, punctuation, repeated whitespace, and boilerplate prefixes like "Department of", "School of", "Center for" while retaining them in ``aliases``.
+- Ensure the canonical phrase remains between 1 and 5 tokens; drop filler words only when they are purely boilerplate.
 - Include clear acronyms seen in the text inside ``aliases`` (e.g., "CS", "EECS").
 - Preserve important diacritics in ``label``/``aliases`` even if ``normalized`` folds them.
 

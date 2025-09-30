@@ -11,8 +11,9 @@ observability:
   quarantine_dir: metadata/quarantine
 audit_mode:
   enabled: false
+  limit: 10
 policies:
-  policy_version: "0.1"
+  policy_version: "0.4"
   level_thresholds:
     level_0:
       min_institutions: 1
@@ -57,10 +58,10 @@ policies:
     punctuation_handling: strip_terminal
   single_token:
     max_tokens_per_level:
-      0: 2
-      1: 2
-      2: 3
-      3: 2
+      0: 5
+      1: 5
+      2: 5
+      3: 5
     forbidden_punctuation:
       - "-"
       - "_"

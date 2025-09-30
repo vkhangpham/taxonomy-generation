@@ -13,7 +13,7 @@ prompts:
     active_variant: v1
     variants:
       v1:
-        description: "Verify that a canonical label is a minimal single-token form."
+        description: "Verify that a canonical label stays within the allowed 1–5 token span."
         template: templates/verification.jinja2
         schema: schemas/verification.json
         optimization_history: []

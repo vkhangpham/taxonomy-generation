@@ -3,7 +3,7 @@
 ## Quick Reference
 
 Purpose
-- Generate candidate tokens from `SourceRecord` inputs using LLM extraction and apply normalization rules.
+- Generate candidate concepts from `SourceRecord` inputs using LLM extraction and apply normalization rules.
 
 Key Classes
 - `S1Processor`: Coordinates extraction by level and aggregates outputs.
@@ -123,7 +123,7 @@ This document specifies how `SourceRecord` inputs are transformed into normalize
 
 - `S1Processor`: level-aware coordinator for batching, extraction, normalization, and aggregation.
 - `ExtractionProcessor`: LLM-backed pattern extractor with deterministic settings (temp=0, JSON mode).
-- `CandidateNormalizer`: canonicalizes casing, ASCII form, and trims stop terms; applies single-token preference.
+- `CandidateNormalizer`: canonicalizes casing, ASCII form, and trims stop terms; enforces the 1–5 token span.
 - `ParentIndex`: resolves parent references where applicable to maintain level consistency.
 
 #### Data Flow
@@ -165,4 +165,3 @@ This document specifies how `SourceRecord` inputs are transformed into normalize
 
 - Normalization yields a unique canonical form per token.
 - Parent references must point to known tokens at the parent level or be omitted.
-

@@ -1,6 +1,6 @@
 # Global Policies — Thresholds, Rules, and Tech Defaults
 
-Policy version: 0.2. This file centralizes level-wise thresholds, label policies, identity mapping, web domain rules, and deterministic LLM/optimization settings. It is implementation-agnostic and binding for re-implementation.
+Policy version: 0.4. This file centralizes level-wise thresholds, label policies, identity mapping, web domain rules, and deterministic LLM/optimization settings. It is implementation-agnostic and binding for re-implementation.
 
 ## Levels and Thresholds
 - Level 0 (Colleges/Schools)
@@ -25,10 +25,11 @@ Weight (for ranking only): weight = 1.0*inst_count + 0.3*log(1+src_count).
 Change control: any threshold change increments this policy version and must be recorded in the run manifest.
 
 ## Label Policy (Minimal Canonical Form)
-- Token minimality: prefer a single alphanumeric token. Multi-word allowed only when abbreviation reduces clarity (e.g., "computer vision").
+- Token minimality: emit the full concept phrasing using 1–5 tokens; avoid collapsing to terse handles unless the source itself is single-token.
 - Punctuation: forbid internal punctuation for canonical label; hyphens converted to spaces; underscores removed.
 - Case: lowercased for comparison; display case may be stored separately.
 - Diacritics: fold to ASCII for comparison; preserve originals as aliases.
+- Institution prefix removal (L0): when a label begins with the owning institution (e.g., "University of X - …"), drop the institution prefix prior to canonicalization; retain the original as an alias.
 - Boilerplate removal (L1): strip leading "department of", "school of", etc.; keep originals as aliases.
 - Length bounds: 2 ≤ len(normalized) ≤ 64; otherwise reject or shorten with rationale.
 - Venue/brand blocklist at L3: disallow conference/journal names as topics (e.g., neurips, icml, cvpr, nature).
