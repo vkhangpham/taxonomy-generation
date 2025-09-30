@@ -1,6 +1,6 @@
-"""Coordinated audit execution of the level 0 taxonomy pipeline in audit mode.
+"""Coordinated audit execution of the taxonomy pipeline in audit mode for any level.
 
-This script orchestrates S0–S3 for level 0 using production settings while
+This script orchestrates S0–S3 for any level (0-3) using production settings while
 forcing audit-mode sampling. It records stage timing, persists observability
 snapshots, and verifies that each stage honours the configured audit limit.
 """
@@ -55,13 +55,20 @@ class StageResult:
 
 def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Execute level 0 taxonomy stages (S0–S3) in audit mode.",
+        description="Execute taxonomy stages (S0–S3) in audit mode for any level (0-3).",
     )
     parser.add_argument(
         "--config",
         type=Path,
         default=DEFAULT_CONFIG_PATH,
         help="Path to the YAML configuration overrides for audit runs.",
+    )
+    parser.add_argument(
+        "--level",
+        type=int,
+        choices=[0, 1, 2, 3],
+        default=0,
+        help="Taxonomy level to audit (0=top-level fields, 1=departments, 2=research areas, 3=fine-grained topics).",
     )
     parser.add_argument(
         "--run-id",
@@ -322,7 +329,7 @@ def _run_s1(
     start = perf_counter()
     candidates = extract_candidates(
         source_records,
-        level=0,
+        level=args.level,
         output_path=output_path,
         metadata_path=metadata_path,
         batch_size=batch_size,
@@ -371,7 +378,7 @@ def _run_s2(
     start = perf_counter()
     result = filter_by_frequency(
         candidates_path,
-        level=0,
+        level=args.level,
         output_path=output_path,
         dropped_output_path=dropped_path,
         metadata_path=metadata_path,
@@ -423,7 +430,7 @@ def _run_s3(
     start = perf_counter()
     result = verify_tokens(
         candidates_path,
-        level=0,
+        level=args.level,
         output_path=output_path,
         failed_output_path=failed_path,
         metadata_path=metadata_path,
@@ -517,37 +524,72 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     try:
         current_stage = "S0"
-        if args.s0_mode == "excel":
-            s0_output = stage_dirs["S0"] / "source_records.jsonl"
-            stage_results.append(
-                _run_s0_excel(
-                    settings=settings,
-                    output_path=s0_output,
-                    limit=args.limit,
+        # Level 0: allow Excel/snapshots/reuse
+        # Levels 1-3: require snapshots or reuse (no Excel bootstrap)
+        if args.level == 0:
+            if args.s0_mode == "excel":
+                s0_output = stage_dirs["S0"] / "source_records.jsonl"
+                stage_results.append(
+                    _run_s0_excel(
+                        settings=settings,
+                        output_path=s0_output,
+                        limit=args.limit,
+                    )
                 )
-            )
-            s0_records_path = s0_output
-        elif args.s0_mode == "snapshots":
-            if not args.snapshots_path:
-                raise ValueError(
-                    "--snapshots-path is required when --s0-mode=snapshots"
+                s0_records_path = s0_output
+            elif args.s0_mode == "snapshots":
+                if not args.snapshots_path:
+                    raise ValueError(
+                        "--snapshots-path is required when --s0-mode=snapshots"
+                    )
+                s0_output = stage_dirs["S0"] / "source_records.jsonl"
+                stage_results.append(
+                    _run_s0_snapshots(
+                        settings=settings,
+                        snapshots_path=args.snapshots_path,
+                        output_path=s0_output,
+                        limit=args.limit,
+                        batch_size=args.s0_batch_size,
+                    )
                 )
-            s0_output = stage_dirs["S0"] / "source_records.jsonl"
-            stage_results.append(
-                _run_s0_snapshots(
-                    settings=settings,
-                    snapshots_path=args.snapshots_path,
-                    output_path=s0_output,
-                    limit=args.limit,
-                    batch_size=args.s0_batch_size,
-                )
-            )
-            s0_records_path = s0_output
+                s0_records_path = s0_output
+            else:  # reuse
+                if not args.existing_s0_path:
+                    raise ValueError(
+                        "--existing-s0-path is required when --s0-mode=reuse"
+                    )
+                stage_results.append(_reuse_s0(args.existing_s0_path, args.limit))
+                s0_records_path = args.existing_s0_path
         else:
-            if not args.existing_s0_path:
-                raise ValueError("--existing-s0-path is required when --s0-mode=reuse")
-            stage_results.append(_reuse_s0(args.existing_s0_path, args.limit))
-            s0_records_path = args.existing_s0_path
+            # Levels 1-3: require snapshots or reuse (no Excel)
+            if args.s0_mode == "excel":
+                raise ValueError(
+                    f"--s0-mode=excel is only supported for level 0. "
+                    f"For level {args.level}, use --s0-mode=snapshots or --s0-mode=reuse."
+                )
+            elif args.s0_mode == "snapshots":
+                if not args.snapshots_path:
+                    raise ValueError(
+                        "--snapshots-path is required when --s0-mode=snapshots"
+                    )
+                s0_output = stage_dirs["S0"] / "source_records.jsonl"
+                stage_results.append(
+                    _run_s0_snapshots(
+                        settings=settings,
+                        snapshots_path=args.snapshots_path,
+                        output_path=s0_output,
+                        limit=args.limit,
+                        batch_size=args.s0_batch_size,
+                    )
+                )
+                s0_records_path = s0_output
+            else:  # reuse
+                if not args.existing_s0_path:
+                    raise ValueError(
+                        "--existing-s0-path is required when --s0-mode=reuse"
+                    )
+                stage_results.append(_reuse_s0(args.existing_s0_path, args.limit))
+                s0_records_path = args.existing_s0_path
 
         observability = ObservabilityContext(
             run_id=run_id,
@@ -555,8 +597,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
 
         current_stage = "S1"
-        s1_output = stage_dirs["S1"] / "level0_candidates.jsonl"
-        s1_metadata = stage_dirs["S1"] / "level0_candidates.metadata.json"
+        s1_output = stage_dirs["S1"] / f"level{args.level}_candidates.jsonl"
+        s1_metadata = stage_dirs["S1"] / f"level{args.level}_candidates.metadata.json"
         stage_results.append(
             _run_s1(
                 settings=settings,
@@ -570,9 +612,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
 
         current_stage = "S2"
-        s2_output = stage_dirs["S2"] / "level0_kept.jsonl"
-        s2_dropped = stage_dirs["S2"] / "level0_dropped.jsonl"
-        s2_metadata = stage_dirs["S2"] / "level0.metadata.json"
+        s2_output = stage_dirs["S2"] / f"level{args.level}_kept.jsonl"
+        s2_dropped = stage_dirs["S2"] / f"level{args.level}_dropped.jsonl"
+        s2_metadata = stage_dirs["S2"] / f"level{args.level}.metadata.json"
         stage_results.append(
             _run_s2(
                 settings=settings,
@@ -586,9 +628,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
 
         current_stage = "S3"
-        s3_output = stage_dirs["S3"] / "level0_verified.jsonl"
-        s3_failed = stage_dirs["S3"] / "level0_failed.jsonl"
-        s3_metadata = stage_dirs["S3"] / "level0.metadata.json"
+        s3_output = stage_dirs["S3"] / f"level{args.level}_verified.jsonl"
+        s3_failed = stage_dirs["S3"] / f"level{args.level}_failed.jsonl"
+        s3_metadata = stage_dirs["S3"] / f"level{args.level}.metadata.json"
         stage_results.append(
             _run_s3(
                 settings=settings,
