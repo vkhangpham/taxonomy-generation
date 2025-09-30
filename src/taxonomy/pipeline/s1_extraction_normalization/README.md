@@ -3,7 +3,7 @@
 ## Quick Reference
 
 Purpose
-- Generate candidate concepts from `SourceRecord` inputs using LLM extraction and apply normalization rules.
+- Generate candidate **research topics/fields** from `SourceRecord` inputs using LLM extraction and apply normalization rules. For Level 0, this means extracting the research domain represented by top-level academic units (e.g., "School of Medicine" → "medicine"), not the unit names themselves.
 
 Key Classes
 - `S1Processor`: Coordinates extraction by level and aggregates outputs.
@@ -52,7 +52,7 @@ Rules & Invariants
 - Parent anchoring: include best-effort parent references or textual anchors; never hallucinate parents absent evidence. Anchor resolution normalizes against all shallower levels and, when no stable identifier exists, emits a scoped fallback (`L{level}:{normalized}`) to avoid collisions.
 
 Core Logic
-- Prompt level definition (what belongs at L0/L1/L2/L3) with 1–2 minimal examples per level.
+- Prompt level definition (what belongs at L0/L1/L2/L3) with 1–2 minimal examples per level. **L0 extracts research fields/domains** (e.g., "communication", "medicine", "business", "law") from top-level academic unit names, aligning with L1-L3 behavior of extracting research topics.
 - Extract labels; generate normalized forms; collect plausible aliases when present.
 - Attach SourceRecord provenance to support and compute an initial institution set.
 
@@ -81,7 +81,18 @@ Open Questions
 - Should we allow multi-word preservation at L3 when abbreviation harms clarity?
 
 Examples
-- Example A: Level 1 department normalization
+- Example A0: Level 0 research field extraction
+  - Input SourceRecord:
+    ```json
+    {"text": "Annenberg School for Communication", "provenance": {"institution": "upenn", "url": "https://upenn.edu/academics"}}
+    ```
+  - Expected Candidates:
+    ```json
+    {"level": 0, "label": "communication", "normalized": "communication", "parents": [], "aliases": ["communications"], "support": {"institutions": ["upenn"], "records": ["r0"]}}
+    ```
+  - Note: The unit name "Annenberg School for Communication" is transformed into the research field "communication".
+
+- Example A1: Level 1 department normalization
   - Input SourceRecord:
     ```json
     {"text": "Department of Computer Science", "provenance": {"institution": "u2", "url": "https://u2.edu/eng/departments"}}

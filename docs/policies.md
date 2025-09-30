@@ -1,12 +1,15 @@
 # Global Policies — Thresholds, Rules, and Tech Defaults
 
-Policy version: 0.4. This file centralizes level-wise thresholds, label policies, identity mapping, web domain rules, and deterministic LLM/optimization settings. It is implementation-agnostic and binding for re-implementation.
+Policy version: 0.5. This file centralizes level-wise thresholds, label policies, identity mapping, web domain rules, and deterministic LLM/optimization settings. It is implementation-agnostic and binding for re-implementation.
+
+**Version 0.5 Changes (2025):**
+- S1 extraction now emits research topics/fields for all levels, including L0. Previously, L0 extracted organizational unit names (e.g., "College of Engineering"); now it extracts the research field the unit represents (e.g., "engineering"). This aligns S1 behavior across all levels: S1–S3 logic is now uniform, with only S0 (data source) differing by level.
 
 ## Levels and Thresholds
-- Level 0 (Colleges/Schools)
+- Level 0 (Research Fields from Top-Level Units)
   - min_institutions: 1
   - min_src_count: 1
-  - notes: names vary widely; lenient thresholds.
+  - notes: extracted from top-level academic unit names (e.g., School of Medicine → medicine); names vary widely; lenient thresholds.
 - Level 1 (Departments)
   - min_institutions: 1
   - min_src_count: 1

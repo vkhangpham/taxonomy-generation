@@ -34,7 +34,9 @@ S0 Raw Extraction
 - Filter: min/max length; allowed character set; dedupe near‑identical blocks per page.
 
 S1 Extraction & Normalization (LLM‑assisted)
-- For each SourceRecord, prompt for level‑appropriate candidates with strict JSON output:
+- For each SourceRecord, prompt for level‑appropriate research topics/fields with strict JSON output:
+  - Level 0: Extract the research field/domain represented by top‑level academic units (e.g., "Annenberg School for Communication" → "communication"; "Perelman School of Medicine" → "medicine").
+  - Levels 1–3: Extract departments, research areas, and fine‑grained topics as before.
   - Fields: {label, normalized, parent_anchor?, aliases[], confidence?, notes?}
   - Determinism: require sorted outputs (by normalized, case‑insensitive) and temperature 0.0.
 - Post‑processing:

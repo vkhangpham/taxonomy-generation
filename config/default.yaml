@@ -13,7 +13,7 @@ audit_mode:
   enabled: false
   limit: 10
 policies:
-  policy_version: "0.4"
+  policy_version: "0.5"
   level_thresholds:
     level_0:
       min_institutions: 1

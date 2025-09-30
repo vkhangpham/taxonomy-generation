@@ -1,10 +1,16 @@
 schema_version: 1
 prompts:
   taxonomy.extract:
-    active_variant: v1
+    active_variant: v2
     variants:
       v1:
         description: "Extract taxonomy candidate labels from institutional text."
+        template: templates/extraction.jinja2
+        schema: schemas/extraction.json
+        enforce_order_by: normalized
+        optimization_history: []
+      v2:
+        description: "Extract research topics/fields for all levels (L0 emits fields, not unit names)."
         template: templates/extraction.jinja2
         schema: schemas/extraction.json
         enforce_order_by: normalized

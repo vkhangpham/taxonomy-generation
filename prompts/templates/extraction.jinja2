@@ -17,9 +17,15 @@ Guidelines:
 
 Level definitions:
 {% if level == 0 %}
-- Level 0 represents top-level academic units ("College of Engineering", "School of Medicine"). Include unique divisions that operate at the institution level.
+- Level 0 represents research topics/fields derived from top-level academic units. Extract the research domain or field that the unit represents, not the unit name itself.
+- Examples:
+  - "Annenberg School for Communication" → extract "communication"
+  - "Perelman School of Medicine" → extract "medicine"
+  - "Wharton School" → extract "business"
+  - "Penn Carey Law" → extract "law"
+  - "School of Engineering and Applied Science" → extract "engineering"
 - Example output:
-  [{"label": "College of Engineering", "normalized": "college of engineering", "parents": [], "aliases": ["college of engineering"]}]
+  [{"label": "communication", "normalized": "communication", "parents": [], "aliases": ["communications"]}]
 {% elif level == 1 %}
 - Level 1 represents departments or programs inside a college/school ("Department of Computer Science"). Strip boilerplate prefixes like "Department of" when normalizing.
 - Example output:
