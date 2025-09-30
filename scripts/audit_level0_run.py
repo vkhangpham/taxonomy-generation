@@ -127,15 +127,17 @@ def _load_config(path: Path) -> dict[str, Any]:
     return loaded
 
 
-def _initialise_settings(config_path: Path) -> Settings:
+def _initialise_settings(config_path: Path, *, audit_limit: int) -> Settings:
     overrides = _load_config(config_path)
     overrides.setdefault("create_dirs", True)
     audit_overrides = overrides.setdefault("audit_mode", {})
     audit_overrides["enabled"] = True
+    audit_overrides["limit"] = audit_limit
     overrides.setdefault("environment", "production")
     settings = Settings(**overrides)
     if not settings.audit_mode.enabled:
         settings.audit_mode.enabled = True
+    settings.audit_mode.limit = audit_limit
     return settings
 
 
@@ -327,6 +329,7 @@ def _run_s1(
         settings=settings,
         observability=observability,
         audit_mode=True,
+        audit_limit=limit,
     )
     duration = perf_counter() - start
     stage_end = _timestamp()
@@ -492,7 +495,7 @@ def _build_summary(
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = _parse_args(argv)
-    settings = _initialise_settings(args.config)
+    settings = _initialise_settings(args.config, audit_limit=args.limit)
     run_id = args.run_id or datetime.now(timezone.utc).strftime("audit-%Y%m%d-%H%M%S")
     log_path = _configure_logging(settings.paths.logs_dir, run_id, args.log_level)
     _ensure_env_vars(args.require_env)

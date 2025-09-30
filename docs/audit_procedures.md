@@ -15,14 +15,14 @@ This guide documents the end-to-end process for executing a level 0 taxonomy aud
    source .venv/bin/activate
    python main.py manage config --validate --environment production
    ```
-2. Launch the audit-mode pipeline orchestration. The default configuration in `audit_config.yaml` outputs to `output/audit_runs/<run_id>/` and caps each stage at 10 items.
-   ```bash
-   python -m scripts.audit_level0_run \
+2. Launch the audit-mode pipeline orchestration. The default configuration in `audit_config.yaml` outputs to `output/audit_runs/<run_id>/` and caps each stage at the configured audit `limit` (10 by default).
+  ```bash
+  python -m scripts.audit_level0_run \
      --s0-mode excel \
      --limit 10
-   ```
-   - Use `--s0-mode snapshots --snapshots-path <path>` to ingest JSONL snapshots instead of Excel.
-   - Use `--s0-mode reuse --existing-s0-path <path>` to skip S0 generation when a prior `source_records.jsonl` should be reused.
+  ```
+  - Use `--s0-mode snapshots --snapshots-path <path>` to ingest JSONL snapshots instead of Excel.
+  - Use `--s0-mode reuse --existing-s0-path <path>` to skip S0 generation when a prior `source_records.jsonl` should be reused.
 3. Confirm the run completed successfully by inspecting `output/audit_runs/<run_id>/audit_run_summary.json` and `observability_snapshot.json`.
 
 ## Quality Assessment
@@ -64,6 +64,6 @@ This guide documents the end-to-end process for executing a level 0 taxonomy aud
 - **Missing credentials**: The orchestrator checks for required environment variables and exits with a descriptive error. Export the credentials and rerun.
 - **Polars import errors during S0 Excel bootstrap**: Install `polars` (`pip install polars`) and rerun the audit. The dependency is required for Excel ingestion.
 - **LLM provider timeouts in S3**: Verify production API quotas, then rerun S3 in isolation via `python -m scripts.audit_level0_run --s0-mode reuse --existing-s0-path ...` to avoid repeating earlier stages.
-- **Large audit outputs**: Ensure the audit limit remains at 10. If outputs exceed the cap, confirm `audit_mode.enabled` is true in `audit_config.yaml` and rerun the pipeline.
+- **Large audit outputs**: Ensure the audit limit matches expectations. If outputs exceed the cap, confirm both `audit_mode.enabled` and `audit_mode.limit` are set correctly in `audit_config.yaml`, or pass `--limit <n>` when invoking the script, then rerun the pipeline.
 
 Following this procedure ensures each level 0 audit run is reproducible, thoroughly documented, and ready for downstream remediation work.
