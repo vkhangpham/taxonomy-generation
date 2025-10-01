@@ -34,3 +34,4 @@ htmlcov/
 *.log
 .serena-cli/
 dspy_cache/
+audit_runs/
