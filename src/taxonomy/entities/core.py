@@ -136,7 +136,13 @@ class Candidate(BaseModel):
     """Intermediate label proposal emitted by S0-S1 stages."""
 
     level: int = Field(..., ge=0, le=3, description="Hierarchy depth the candidate belongs to")
-    label: str = Field(..., min_length=1, description="Label as extracted from the source")
+    label: str = Field(
+        ...,
+        min_length=1,
+        description=(
+            "Label as extracted from the source. DEPRECATED: Use observed_forms instead; will be removed in v0.7."
+        ),
+    )
     normalized: str = Field(..., min_length=1, description="Canonicalized representation of the label")
     parents: List[str] = Field(
         default_factory=list,
@@ -144,7 +150,19 @@ class Candidate(BaseModel):
     )
     aliases: List[str] = Field(
         default_factory=list,
-        description="Alternative strings observed for the candidate label.",
+        description=(
+            "Alternative strings observed for the candidate label. DEPRECATED: Use variants instead; will be removed in v0.7."
+        ),
+    )
+    variants: List[str] = Field(
+        default_factory=list,
+        description=(
+            "Concept-derived alternative forms generated from the normalized canonical label."
+        ),
+    )
+    observed_forms: List[str] = Field(
+        default_factory=list,
+        description="Verbatim label strings observed in source records.",
     )
     support: SupportStats = Field(default_factory=SupportStats)
 
@@ -232,7 +250,22 @@ class Concept(BaseModel):
     level: int = Field(..., ge=0, le=3)
     canonical_label: str = Field(..., min_length=1)
     parents: List[str] = Field(default_factory=list)
-    aliases: List[str] = Field(default_factory=list)
+    aliases: List[str] = Field(
+        default_factory=list,
+        description=(
+            "Alternative strings for the concept. DEPRECATED: Use variants instead; will be removed in v0.7."
+        ),
+    )
+    variants: List[str] = Field(
+        default_factory=list,
+        description=(
+            "Concept-derived alternative forms generated from the canonical label."
+        ),
+    )
+    observed_forms: List[str] = Field(
+        default_factory=list,
+        description="Verbatim label strings observed across source records.",
+    )
     support: SupportStats = Field(default_factory=SupportStats)
     rationale: Rationale = Field(default_factory=Rationale)
     validation_passed: bool | None = Field(
