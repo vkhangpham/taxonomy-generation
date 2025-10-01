@@ -67,6 +67,39 @@ _AMBIGUOUS_ACRONYMS: frozenset[str] = frozenset({"ai"})
 # handled by stripping within :func:`detect_acronyms` to keep the expression
 # readable.
 _ACRONYM_PATTERN = re.compile(r"\b[A-Z]{2,}(?:&[A-Z]{2,})*\b")
+_ACRONYM_MAX_LENGTH = 6
+_ACRONYM_STOPWORDS = frozenset(
+    {
+        "OF",
+        "THE",
+        "AND",
+        "FOR",
+        "WITH",
+        "FROM",
+        "IN",
+        "ON",
+        "BY",
+        "AT",
+        "TO",
+        "UNIVERSITY",
+        "COLLEGE",
+        "SCHOOL",
+        "DEPARTMENT",
+        "DEPT",
+        "CENTER",
+        "CENTRE",
+        "INSTITUTE",
+        "LAB",
+        "LABORATORY",
+        "PROGRAM",
+        "PROGRAMME",
+        "RESEARCH",
+        "SCIENCE",
+        "ENGINEERING",
+        "STUDIES",
+        "PENNSYLVANIA",
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -106,6 +139,7 @@ def remove_boilerplate(
     level: int,
     *,
     policy: LabelPolicy | None = None,
+    owning_institution: str | None = None,
 ) -> AliasBundle:
     """Strip level-aware boilerplate prefixes while preserving aliases.
 
@@ -123,6 +157,20 @@ def remove_boilerplate(
     minimal_form = policy.minimal_canonical_form if policy else None
     working = label.strip()
     aliases: List[str] = []
+
+    # L0: strip owning institution prefix when present (e.g.,
+    # "University of X - School of Y" -> "School of Y"). Keep the original
+    # variant as an alias to preserve traceability.
+    if owning_institution and level == 0:
+        inst_raw = owning_institution.strip()
+        if inst_raw:
+            # Case-insensitive, punctuation-tolerant prefix match supporting
+            # common separators: dash, colon, pipe, or whitespace.
+            escaped = re.escape(inst_raw)
+            prefix_pattern = rf"^\s*(?:{escaped})\s*(?:[-–—:\|])?\s+"
+            if re.compile(prefix_pattern, flags=re.IGNORECASE).match(working):
+                aliases.append(working)
+                working = re.sub(prefix_pattern, "", working, flags=re.IGNORECASE).lstrip()
 
     prefixes = _LEVEL_PREFIXES.get(level, tuple())
     lowered = working.lower()
@@ -157,6 +205,10 @@ def detect_acronyms(text: str) -> Tuple[str, ...]:
     for match in _ACRONYM_PATTERN.finditer(text):
         acronym = match.group(0).strip(".()[]{}:;,")
         if len(acronym) < 2:
+            continue
+        if len(acronym) > _ACRONYM_MAX_LENGTH:
+            continue
+        if acronym in _ACRONYM_STOPWORDS:
             continue
         seen[acronym] = None
     return tuple(seen.keys())
@@ -256,17 +308,34 @@ def _apply_minimal_form(text: str, minimal: MinimalCanonicalForm) -> str:
     return working
 
 
-def normalize_by_level(label: str, level: int, policy: LabelPolicy) -> str:
+def normalize_by_level(
+    label: str,
+    level: int,
+    policy: LabelPolicy,
+    *,
+    owning_institution: str | None = None,
+) -> str:
     """Apply level-aware normalization rules for canonical comparisons."""
 
-    bundle = remove_boilerplate(label, level, policy=policy)
+    bundle = remove_boilerplate(
+        label,
+        level,
+        policy=policy,
+        owning_institution=owning_institution,
+    )
     minimal = policy.minimal_canonical_form
     normalized = normalize_label(bundle.cleaned)
     normalized = _apply_minimal_form(normalized, minimal)
     return normalized
 
 
-def to_canonical_form(label: str, level: int, policy: LabelPolicy) -> Tuple[str, Tuple[str, ...]]:
+def to_canonical_form(
+    label: str,
+    level: int,
+    policy: LabelPolicy,
+    *,
+    owning_institution: str | None = None,
+) -> Tuple[str, Tuple[str, ...]]:
     """Return the canonical form along with aliases generated for *label*.
 
     The aliases incorporate boilerplate variants, acronym forms, and
@@ -275,7 +344,12 @@ def to_canonical_form(label: str, level: int, policy: LabelPolicy) -> Tuple[str,
     leveraging :func:`normalize_label` for core transformations.
     """
 
-    bundle = remove_boilerplate(label, level, policy=policy)
+    bundle = remove_boilerplate(
+        label,
+        level,
+        policy=policy,
+        owning_institution=owning_institution,
+    )
     minimal = policy.minimal_canonical_form
     normalized = normalize_label(bundle.cleaned)
     normalized = _apply_minimal_form(normalized, minimal)

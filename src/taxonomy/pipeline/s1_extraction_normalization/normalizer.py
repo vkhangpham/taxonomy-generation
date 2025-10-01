@@ -46,7 +46,12 @@ class CandidateNormalizer:
         minimal = self._policy.minimal_canonical_form
 
         for raw in raw_candidates:
-            canonical, generated_aliases = to_canonical_form(raw.label, level, self._policy)
+            canonical, generated_aliases = to_canonical_form(
+                raw.label,
+                level,
+                self._policy,
+                owning_institution=raw.source.provenance.institution,
+            )
             if not canonical:
                 continue
             if len(canonical) < minimal.min_length or len(canonical) > minimal.max_length:

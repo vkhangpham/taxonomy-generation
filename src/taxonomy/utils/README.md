@@ -6,7 +6,7 @@ Purpose
 - Shared text processing, similarity, phonetic matching, and helper utilities used across all pipeline phases.
 
 Key APIs
-- Normalization: `normalize_by_level(text, level)`, `generate_aliases(label)`.
+- Normalization: `normalize_by_level(text, level, *, owning_institution=None)`, `generate_aliases(label)`.
 - Similarity: `compute_similarity(a, b)`, `find_duplicates(items, threshold)`.
 - Phonetic: `double_metaphone(text)`, `bucket_by_phonetic(items)`.
 - Helpers: `chunked(iterable, size)`, `stable_shuffle(seq, seed)`.
@@ -99,9 +99,9 @@ Open Questions
 
 Normalization (`src/taxonomy/utils/normalization.py`)
 - `AliasBundle` — container for primary label and derived aliases.
-- `to_canonical_form(text)` — ASCII‑preferred canonicalization (case, punctuation, whitespace).
-- `remove_boilerplate(text, *, patterns=None)` — strips policy‑defined boilerplate.
-- `normalize_by_level(text, level)` — applies level‑specific canonical rules.
+- `to_canonical_form(text, level, policy, *, owning_institution=None)` — ASCII‑preferred canonicalization with optional L0 institution‑prefix stripping.
+- `remove_boilerplate(text, level, *, policy=None, owning_institution=None)` — strips policy‑defined boilerplate and, for L0 when provided, the owning institution prefix.
+- `normalize_by_level(text, level, policy, *, owning_institution=None)` — applies level‑specific canonical rules.
 - `generate_aliases(text, *, level)` — heuristic expansions with deterministic ordering.
 
 Acronyms (`src/taxonomy/utils/acronym.py`)
@@ -148,4 +148,3 @@ Examples
   ```python
   bucket_by_phonetic(["robitics", "robotics"])  # stable grouping
   ```
-

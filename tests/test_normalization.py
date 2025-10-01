@@ -25,6 +25,16 @@ def test_detect_acronyms_identifies_uppercase() -> None:
     assert detect_acronyms(text) == ("CS", "EECS")
 
 
+def test_detect_acronyms_skips_stopwords_and_long_tokens() -> None:
+    text = "UNIVERSITY OF PENNSYLVANIA"
+    assert detect_acronyms(text) == ()
+
+
+def test_detect_acronyms_retains_shorter_tokens() -> None:
+    text = "UPENN collaborates with AI partners"
+    assert detect_acronyms(text) == ("UPENN", "AI")
+
+
 def test_expand_acronym_known_value(label_policy: LabelPolicy) -> None:
     assert (
         expand_acronym("EECS", level=1, policy=label_policy)
