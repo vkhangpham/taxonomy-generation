@@ -63,7 +63,14 @@ def _generate_command(
     audit_mode: bool = typer.Option(
         False,
         "--audit-mode",
-        help="Limit the selected stage to 10 items for audit verification.",
+        help="Enable audit sampling using the configured audit limit.",
+    ),
+    audit_limit: Optional[int] = typer.Option(
+        None,
+        "--audit-limit",
+        min=1,
+        help="Override the audit sample size for the selected stage.",
+        show_default=False,
     ),
 ) -> None:
     state = get_state(ctx)
@@ -75,9 +82,12 @@ def _generate_command(
     output_resolved = resolve_path(output_path, must_exist=False)
 
     resume_checkpoint = resolve_path(resume_from, must_exist=True) if resume_from else None
+    if audit_limit is not None:
+        state.settings.audit_mode.limit = audit_limit
     effective_audit_mode = audit_mode or state.settings.audit_mode.enabled
     if audit_mode and not state.settings.audit_mode.enabled:
         state.settings.audit_mode.enabled = True
+    effective_audit_limit = audit_limit if audit_limit is not None else state.settings.audit_mode.limit
 
     with Progress(transient=True) as progress:
         task = progress.add_task(f"Running {resolved_step}", start=False)
@@ -102,6 +112,7 @@ def _generate_command(
                 settings=state.settings,
                 observability=observability,
                 audit_mode=effective_audit_mode,
+                audit_limit=effective_audit_limit,
             )
         elif resolved_step == "S2":
             if level is None:

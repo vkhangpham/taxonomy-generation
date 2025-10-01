@@ -33,6 +33,7 @@ def extract_candidates(
     settings: Settings | None = None,
     observability: ObservabilityContext | None = None,
     audit_mode: bool = False,
+    audit_limit: int | None = None,
 ) -> List[Candidate]:
     """High-level API for running the S1 pipeline.
 
@@ -47,10 +48,19 @@ def extract_candidates(
         settings: Optional pre-loaded :class:`Settings` instance.
         observability: Optional observability context used for standardized
             metrics, evidence, and quarantine tracking.
+        audit_limit: Optional override for the audit-mode record cap. Defaults
+            to the configured ``Settings.audit_mode.limit`` when omitted.
     """
 
     cfg = settings or Settings()
     audit_mode_enabled = bool(audit_mode or cfg.audit_mode.enabled)
+    effective_audit_limit: int | None = None
+    if audit_mode_enabled:
+        effective_audit_limit = audit_limit if audit_limit is not None else cfg.audit_mode.limit
+        if effective_audit_limit is None:
+            effective_audit_limit = cfg.audit_mode.limit
+        if effective_audit_limit <= 0:
+            raise ValueError("audit_limit must be positive when audit mode is enabled")
     label_policy = cfg.policies.label_policy
     extractor = ExtractionProcessor(observability=observability)
     normalizer = CandidateNormalizer(label_policy=label_policy)
@@ -108,7 +118,9 @@ def extract_candidates(
 
     def _source_iter() -> Iterator:
         records = load_source_records(source_records_path)
-        return _limit_source_records(records) if audit_mode_enabled else records
+        if audit_mode_enabled:
+            return _limit_source_records(records, limit=effective_audit_limit)
+        return records
 
     total_records: int | None = None
     if cfg.observability.precount_s1_records:
@@ -135,7 +147,11 @@ def extract_candidates(
 
         output_destination: Path | None = None
         if output_path is not None:
-            output_destination = _stream_candidates(candidates, output_path)
+            # Include support details (institutions, record fingerprints) from
+            # the aggregated state to preserve provenance for S2.
+            output_destination = _stream_candidates_enveloped(
+                aggregated_state.values(), output_path
+            )
 
         snapshot_after = obs_context.snapshot() if obs_context is not None else None
 
@@ -200,6 +216,8 @@ def extract_candidates(
             "batch_size": batch_size,
             "audit_mode": audit_mode_enabled,
         }
+        if audit_mode_enabled and effective_audit_limit is not None:
+            config_used["audit_limit"] = effective_audit_limit
 
         metadata_destination: Path | None
         if metadata_path is not None:
@@ -264,11 +282,53 @@ def _merge_aggregated_state(
 
 
 def _stream_candidates(candidates: Sequence[Candidate], output_path: str | Path) -> Path:
+    """Deprecated: write bare Candidate JSONL without support details.
+
+    Retained for backward compatibility in auxiliary utilities.
+    """
     path = Path(output_path)
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8") as handle:
         for candidate in candidates:
             handle.write(json.dumps(candidate.model_dump(), sort_keys=True))
+            handle.write("\n")
+    return path.resolve()
+
+
+def _stream_candidates_enveloped(
+    buckets: Iterable[AggregatedCandidate], output_path: str | Path
+) -> Path:
+    """Write candidates wrapped with supporting institutions and records."""
+
+    path = Path(output_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8") as handle:
+        for bucket in sorted(
+            buckets, key=lambda item: (item.level, item.normalized, tuple(item.parents))
+        ):
+            parents_list = list(bucket.parents)
+            if bucket.level == 0:
+                parents_list = []
+            support = {
+                "records": len(bucket.record_fingerprints),
+                "institutions": len(bucket.institutions),
+                "count": bucket.total_count,
+            }
+            aliases = sorted(set(bucket.aliases | {bucket.primary_label}))
+            candidate_payload = {
+                "level": bucket.level,
+                "label": bucket.primary_label,
+                "normalized": bucket.normalized,
+                "parents": parents_list,
+                "aliases": aliases,
+                "support": support,
+            }
+            envelope = {
+                "candidate": candidate_payload,
+                "institutions": sorted(bucket.institutions),
+                "record_fingerprints": sorted(bucket.record_fingerprints),
+            }
+            handle.write(json.dumps(envelope, sort_keys=True))
             handle.write("\n")
     return path.resolve()
 
@@ -378,6 +438,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             resume_from=args.resume_from,
             batch_size=args.batch_size,
             audit_mode=args.audit_mode,
+            audit_limit=args.audit_limit,
         )
     except Exception as exc:  # pragma: no cover - defensive CLI guard
         logger.exception("S1 extraction failed", error=str(exc))

@@ -152,7 +152,12 @@ class AuditModeConfig(BaseModel):
 
     enabled: bool = Field(
         default=False,
-        description="Limit each pipeline stage to a small sample (10 items) for audit runs.",
+        description="Limit each pipeline stage to a small sample for audit runs.",
+    )
+    limit: int = Field(
+        default=10,
+        ge=1,
+        description="Maximum number of records processed per stage when audit sampling is active.",
     )
 
 

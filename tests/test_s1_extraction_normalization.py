@@ -1,4 +1,5 @@
 from collections import Counter
+from types import SimpleNamespace
 from typing import List
 
 import pytest
@@ -110,3 +111,75 @@ def test_candidate_allows_empty_parents_above_level_zero() -> None:
         support=support,
     )
     assert candidate.parents == []
+
+
+def test_extract_candidates_respects_audit_limit(monkeypatch) -> None:
+    from taxonomy.pipeline.s1_extraction_normalization import main as s1_main
+
+    records = list(range(20))
+
+    monkeypatch.setattr(s1_main, "load_source_records", lambda _: iter(records))
+
+    captured: dict[str, int] = {}
+    original_limit = s1_main._limit_source_records
+
+    def tracking_limit(iterable, *, limit: int):
+        captured["limit"] = limit
+        return original_limit(iterable, limit=limit)
+
+    monkeypatch.setattr(s1_main, "_limit_source_records", tracking_limit)
+
+    class DummyExtractor:
+        def __init__(self, observability=None):
+            self.observability = observability
+            self.metrics = SimpleNamespace(
+                records_in=0,
+                candidates_out=0,
+                invalid_json=0,
+                quarantined=0,
+                provider_errors=0,
+                retries=0,
+            )
+
+        def extract_candidates(self, batch, *, level: int, observability=None):
+            return []
+
+    class DummyNormalizer:
+        def __init__(self, label_policy):
+            pass
+
+        def normalize(self, raw, *, level: int):
+            return raw
+
+    class DummyParentIndex:
+        def __init__(self, **kwargs):
+            pass
+
+        def build_index(self, parents):
+            return None
+
+    class DummyProcessor:
+        def __init__(self, extractor, normalizer, parent_index):
+            pass
+
+        def _aggregate(self, normalized):
+            return normalized
+
+        def _materialize(self, values):
+            return []
+
+    monkeypatch.setattr(s1_main, "ExtractionProcessor", DummyExtractor)
+    monkeypatch.setattr(s1_main, "CandidateNormalizer", DummyNormalizer)
+    monkeypatch.setattr(s1_main, "ParentIndex", DummyParentIndex)
+    monkeypatch.setattr(s1_main, "S1Processor", DummyProcessor)
+    monkeypatch.setattr(s1_main, "_merge_aggregated_state", lambda target, items: None)
+
+    result = s1_main.extract_candidates(
+        "dummy",
+        level=0,
+        audit_mode=True,
+        audit_limit=5,
+    )
+
+    assert captured["limit"] == 5
+    assert result == []
