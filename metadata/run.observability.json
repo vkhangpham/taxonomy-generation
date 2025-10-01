@@ -1,6 +1,6 @@
 {
-  "captured_at": "2025-09-29T08:54:54.626919Z",
-  "checksum": "cf304bcbf7a3e791fea680df147c4a7f8f8126c37f687645f2b73ee40b273610",
+  "captured_at": "2025-09-30T04:50:51.982424Z",
+  "checksum": "0a34b9150109278674560059d46f2f81b8b104a4e7a92eae91c434a1d80b3b68",
   "counters": {
     "Dedup": {
       "components": 0,
@@ -83,7 +83,7 @@
       "outcome": "success",
       "payload": {
         "candidates": 1,
-        "elapsed_seconds": 1.74578744918108e-05,
+        "elapsed_seconds": 4.170788452029228e-05,
         "level": 0,
         "records": 1
       },
@@ -102,7 +102,7 @@
       "outcome": "success",
       "payload": {
         "candidates": 1,
-        "elapsed_seconds": 6.541842594742775e-06,
+        "elapsed_seconds": 2.0666047930717468e-05,
         "level": 1,
         "records": 1
       },
@@ -121,7 +121,7 @@
       "outcome": "success",
       "payload": {
         "candidates": 1,
-        "elapsed_seconds": 6.875023245811462e-06,
+        "elapsed_seconds": 1.7625046893954277e-05,
         "level": 2,
         "records": 1
       },
@@ -140,7 +140,7 @@
       "outcome": "success",
       "payload": {
         "candidates": 1,
-        "elapsed_seconds": 1.1667143553495407e-05,
+        "elapsed_seconds": 1.787487417459488e-05,
         "level": 3,
         "records": 1
       },
@@ -158,7 +158,7 @@
       "operation": "complete",
       "outcome": "success",
       "payload": {
-        "elapsed_seconds": 3.834022209048271e-06,
+        "elapsed_seconds": 1.3042008504271507e-05,
         "level": "consolidation",
         "records": 0
       },
@@ -177,7 +177,7 @@
       "outcome": "success",
       "payload": {
         "converged": true,
-        "elapsed_seconds": 5.833106115460396e-06,
+        "elapsed_seconds": 1.4082994312047958e-05,
         "iterations": 1
       },
       "phase": "S3",
@@ -194,7 +194,7 @@
       "operation": "complete",
       "outcome": "success",
       "payload": {
-        "elapsed_seconds": 4.667090252041817e-06,
+        "elapsed_seconds": 1.2832926586270332e-05,
         "validation_nodes": 1
       },
       "phase": "Hierarchy",
@@ -203,23 +203,23 @@
   ],
   "performance": {
     "Hierarchy": {
-      "elapsed_seconds": 4.667090252041817e-06,
+      "elapsed_seconds": 1.2832926586270332e-05,
       "validation_nodes": 1
     },
     "S1": {
       "candidates": 1,
-      "elapsed_seconds": 1.1667143553495407e-05,
+      "elapsed_seconds": 1.787487417459488e-05,
       "level": 3,
       "records": 1
     },
     "S2": {
-      "elapsed_seconds": 3.834022209048271e-06,
+      "elapsed_seconds": 1.3042008504271507e-05,
       "level": "consolidation",
       "records": 0
     },
     "S3": {
       "converged": true,
-      "elapsed_seconds": 5.833106115460396e-06,
+      "elapsed_seconds": 1.4082994312047958e-05,
       "iterations": 1
     }
   },
@@ -234,7 +234,7 @@
     "llm.random_seed": 12345,
     "settings.random_seed": 20250927
   },
-  "snapshot_timestamp": 1759136094.626919,
+  "snapshot_timestamp": 1759207851.982424,
   "thresholds": {
     "level_thresholds": {
       "level_0": {
